@@ -35,6 +35,17 @@ import Control.Lens.Tuple
 import Language.Haskell.TH.Lens
 import Data.Ord
 
+
+floatMod x y = let
+        r = x/y
+        in r - fromIntegral (floor r) * y
+
+inoctave x 
+        | x >= 0.5 && x <= 2 = x
+        | x > 2 = inoctave (x/2)
+        | x < 0.5 = inoctave (x * 2)
+pitchmap = reverse (take 64 $ iterate ( inoctave . (/1.5)) 1) ++ (take 64 $ iterate (inoctave . (*1.5)) 1)
+
 every = flip map
 
 from128 x = 1/128*fromIntegral x
@@ -49,9 +60,10 @@ data Pat = Pat
         deriving (Show,Read)
 
 $(makeLenses ''Pat)
-        
+       
+
 events :: Pat -> [Tempo]
-events (Pat n w s) = [from128 s + 1 / fromIntegral w / fromIntegral n * fromIntegral j | j <- [0 .. n - 1]]
+events (Pat n w s) = every [from128 s + 1 / fromIntegral w / fromIntegral n * fromIntegral j | j <- [0 .. n - 1]] (`floatMod` 1)
 
 data FP = FP 
         { _ffreq :: Int 
@@ -251,6 +263,7 @@ midiIn  thypes tselection tupdate tsupdate ttmp = (do
                                                 writeTVar thypes ts
                                                 writeTVar ttmp tm
                                                 writeTChan tupdate ()
+                                                forM_ [0..ntracks - 1] $ writeTChan tsupdate 
 
                                         121 -> do
                                                 ts <- atomically $ readTVar thypes
@@ -286,7 +299,7 @@ midiIn  thypes tselection tupdate tsupdate ttmp = (do
                         
         ) `AlsaExc.catch` \e -> putStrLn $ "alsa_exception: " ++ AlsaExc.show e
 
-delay = 0.1
+delay = 0.01
 sampledir = "/home/paolino/Music/samples"
 type Params = M.Map String Double
 
@@ -309,7 +322,7 @@ main = do
         tstartcycle <- newTVarIO 0
         forkOS $ midiIn thypes tprog tupdate tsupdate tmp
         forkOS $ midiOut thypes tprog tupdate
-        let     fw = 0.1 -- fire window
+        let     fw = 256 -- fire window
                 w = 4 -- pattern cycle
         let  updateTEvents = forever . atomically $ do 
                         -- wait for interface change a track parameter 
@@ -319,24 +332,22 @@ main = do
                                 ts' = filter  ((/=n) . etrack) ts
                                 nes = map (\(t,a) -> Event n t (sa,a,pi)) (sequenza s)
                                 in sortBy (comparing etime) $ nes ++ ts'
-             fireEvents t = do    
-                        sleepThreadUntil t -- wait next tick
-                        (t0,ps,es) <- atomically $ do
-                                t0 <- readTVar tstartcycle
-                                es <- fmap (dropWhile ((< t) . (+t0) . (*w) . etime)) $ readTVar tevents
-                                return $  (t0,takeWhile ((< t) . (subtract fw) .(+t0) . (*w) . etime ) es,es)
-                        forM_ ps $ \(Event _ t (sa,a,pi)) -> play sa (t0 + w*t + delay) a (from128p pi)
-                        print $ length es
-                        fireEvents (t + fw) 
+             fireEvents _ [] = return ()
+             fireEvents t0 ((t1,t2):ts) = do    
+                        sleepThreadUntil (t0 + t1) -- wait next tick
+                        let     window f = takeWhile ((< t2) . f). dropWhile ((< t1) . f)
+                        ps <- atomically $ fmap (window ((*w) . etime)) $ readTVar tevents
+                        forM_ ps $ \(Event _ t (sa,a,pi)) -> play sa (t0 + w*t + delay) a (1 + from128p pi)
+                        print (length ps)
+                        fireEvents t0 ts
              updateCycle t n = do
                         sleepThreadUntil (t + n * w)
                         atomically (readTVar tevents) >>= print
-                        atomically $ writeTVar tstartcycle (t + n * w)
+                        forkIO $ fireEvents (t + n * w) $ take fw $ ap zip tail [0,w/fw..]
                         updateCycle t (n + 1)
         
         now <- time 
         forkIO $ updateCycle now 0
-        forkIO $ fireEvents now
         updateTEvents
         
 
@@ -369,7 +380,7 @@ sound trr s mt amp pitch = do
                 writeTVar trr is
                 return i
         print (i,s,mt,amp,pitch)
-        withSC3n i . sendBundle . bundle mt $ [s_new s (-1) AddToTail 1 $ [("amp",amp),("rate",1 + pitch)]]
+        withSC3n i . sendBundle . bundle mt $ [s_new s (-1) AddToTail 1 $ [("amp",amp),("rate",pitch)]]
         
 bootSample :: Int -> Int -> (FilePath,String) -> IO ()
 bootSample j n (fp,i) = do
