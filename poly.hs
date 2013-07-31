@@ -296,7 +296,7 @@ data Event = Event
         , etime :: Tempo
         , esound :: (Int, Double, Int)
         }
-
+        deriving (Show,Read)
 main = do 
         play <- initSamples  sampledir
         tmp <- newTVarIO $ (1,125,0,0)
@@ -321,15 +321,17 @@ main = do
                                 in sortBy (comparing etime) $ nes ++ ts'
              fireEvents t = do    
                         sleepThreadUntil t -- wait next tick
-                        (t0,ps) <- atomically $ do
+                        (t0,ps,es) <- atomically $ do
                                 t0 <- readTVar tstartcycle
                                 es <- fmap (dropWhile ((< t) . (+t0) . (*w) . etime)) $ readTVar tevents
-                                return $  (t0,takeWhile ((< t) . (+ fw) .(+t0) . (*w) . etime ) es)
+                                return $  (t0,takeWhile ((< t) . (subtract fw) .(+t0) . (*w) . etime ) es,es)
                         forM_ ps $ \(Event _ t (sa,a,pi)) -> play sa (t0 + w*t + delay) a (from128p pi)
+                        print $ length es
                         fireEvents (t + fw) 
              updateCycle t n = do
                         sleepThreadUntil (t + n * w)
-                        atomically $ writeTVar tstartcycle t
+                        atomically (readTVar tevents) >>= print
+                        atomically $ writeTVar tstartcycle (t + n * w)
                         updateCycle t (n + 1)
         
         now <- time 
