@@ -35,69 +35,123 @@ import Control.Lens.Tuple
 import Language.Haskell.TH.Lens
 import Data.Ord
 
+every = flip map
 
-data FP = FP {
-        _ffreq :: Int , _fpower :: Int,_fphase :: Int}
+from128 x = 1/128*fromIntegral x
+from128p x = from128 x - 0.5
+type Tempo = Double
+
+data Pat = Pat 
+        { _pnumber :: Int
+        , _pwidth :: Int
+        , _pshift :: Int
+        }
         deriving (Show,Read)
 
-derivative :: FP -> FP 
-derivative (FP w r k) = FP w (r * w) 0
+$(makeLenses ''Pat)
+        
+events :: Pat -> [Tempo]
+events (Pat n w s) = [from128 s + 1 / fromIntegral w / fromIntegral n * fromIntegral j | j <- [0 .. n - 1]]
 
+data FP = FP 
+        { _ffreq :: Int 
+        , _fpower :: Int
+        , _fphase :: Int
+        }
+        deriving (Show,Read)
 
 $(makeLenses ''FP)
 
-type  Fourier = (FP,FP,FP,FP,FP,FP,FP,FP)
+type  Fourier = M.Map Int FP
+type  Presence = M.Map Int Pat
 
-derivativeFourier (w1,w2,w3,w4,w5,w6,w7,w8) = (derivative w1, derivative w2,derivative w3,derivative w4,derivative w5,derivative w6,derivative w7,derivative w8) 
-
+seno :: FP -> Tempo -> Double
 seno (FP w r k) t =  from128 r * sin (2 * pi * from128 k + fromIntegral w * t)
 
-fourier (w1,w2,w3,w4,w5,w6,w7,w8) t = sum . map (flip seno t) $ [w1,w2,w3,w4,w5,w6,w7,w8]
 
-times :: Int -> [Double]
+fourier :: Fourier -> Tempo -> Double
+fourier fou t = sum . map (flip seno t) $ M.elems fou
+
+times :: Int -> [Tempo]
 times l = take l $ [0,2*pi/fromIntegral l .. ]
 
 
+schedule :: Presence -> [Tempo]
+schedule pre = sort . concat $ every (M.elems pre) events
 
 
-from128 x = 1/128*fromIntegral x
 
-valueW :: Int -> Fourier -> Int -> Int  -> [Double]
-valueW w ims  l' d = let   
-        l = l'
-        qs = map (fourier ims) $ times l
+wave :: [Tempo] -> Fourier -> [Double]
+wave ts ims = let   
+        qs = map (fourier ims) $ ts
         mqs = maximum $ map abs qs
-        qs' = if mqs > 0 then map (/mqs) qs else qs
-        in take l . drop (w `mod` l) . cycle $ map (from128 d *) $ qs'
-
+        in if mqs > 0 then map (/mqs) qs else qs
 
 
 data Seq = Seq 
-        { _wave :: Fourier
+        { _ampl :: Fourier
+        , _pres :: Presence
         , _sample :: Int
         , _pitch :: Int -- pitch
         , _groove :: Int -- groove
-        , _width :: Int
+        --, _width :: Int
         , _damp :: Int
         , _dilatation :: Int
         , _shift :: Int
         }
         deriving (Show,Read)
 
-        
-
-
-
 $(makeLenses ''Seq)
+
+noseq = Seq 
+        (M.fromList $ zip [0..3] $ repeat (FP 1 0 0)) 
+        (M.fromList $ zip [0..3] $ repeat (Pat 0 0 0))
+        0
+        64
+        64
+        64
+        1
+        0
+
+
+sequenza ::  Seq -> [(Tempo,Double)]
+sequenza  (Seq a p s pi gr da di sh) = let 
+        ts = schedule p
+        as = every (wave ts a) (from128 da *)
+        ts' = every ts $ \t ->  from128 sh + (fromIntegral di) *t + from128p gr
+        in zip ts' as
 
 nolens  = lens (\_ -> 0) (\s _ -> s)
 
-seq_lenses = 
-        [  wave . _1 . ffreq,wave . _2 . ffreq,wave . _3 . ffreq,wave . _4 . ffreq,wave . _5 . ffreq,wave . _6 . ffreq,wave . _7 . ffreq,wave . _8 . ffreq
-        ,  wave . _1 . fpower,wave . _2 . fpower,wave . _3 . fpower,wave . _4 . fpower,wave . _5 . fpower,wave . _6 . fpower,wave . _7 . fpower,wave . _8 . fpower
-        ,  wave . _1 . fphase,wave . _2 . fphase,wave . _3 . fphase,wave . _4 . fphase,wave . _5 . fphase,wave . _6 . fphase,wave . _7 . fphase,wave . _8 . fphase
-        , sample, pitch, groove,  width,  shift,  dilatation, damp]
+male n = lens (\m -> m M.! n) (flip $ M.insert n)
 
+seq_lenses = 
+        [  pres . male 0 . pnumber
+        ,  pres . male 1 . pnumber
+        ,  pres . male 2 . pnumber
+        ,  pres . male 3 . pnumber
+        ,  ampl . male 0 . ffreq
+        ,  ampl . male 1 . ffreq
+        ,  ampl . male 2 . ffreq
+        ,  ampl . male 3 . ffreq
+        ,  pres . male 0 . pwidth
+        ,  pres . male 1 . pwidth
+        ,  pres . male 2 . pwidth
+        ,  pres . male 3 . pwidth
+        ,  ampl . male 0 . fpower
+        ,  ampl . male 1 . fpower
+        ,  ampl . male 2 . fpower
+        ,  ampl . male 3 . fpower
+        ,  pres . male 0 . pshift
+        ,  pres . male 1 . pshift
+        ,  pres . male 2 . pshift
+        ,  pres . male 3 . pshift
+        ,  ampl . male 0 . fphase
+        ,  ampl . male 1 . fphase
+        ,  ampl . male 2 . fphase
+        ,  ampl . male 3 . fphase
+        , sample, pitch, groove,  shift,  dilatation, damp
+        ]
 
         
 -- interface must select a track or a parameter inside a hype or the hype as a track
@@ -166,7 +220,7 @@ inside n m v  | v < n = n
 -- midiIn :: TVar (M.Map Int Seq) -> TVar Selection -> TChan () -> TVar (Double,Double,Int)
 
 
-midiIn  thypes tselection tupdate ttmp = (do
+midiIn  thypes tselection tupdate tsupdate ttmp = (do
   tcopy <- newTVarIO 0
   SndSeq.withDefault SndSeq.Block $ \h -> do
         Client.setName (h :: SndSeq.T SndSeq.InputMode) "Ws"
@@ -218,12 +272,16 @@ midiIn  thypes tselection tupdate ttmp = (do
                         
                                                                            _ -> return ()
                                                         _ -> return ()
-                                        _ ->   atomically $ do  
+                                        _ ->   atomically $ do
+                                                         
                                                         op <- readTVar tselection
                                                         case op of
-                                                                Tracks prog -> when (pa < 31) $   modifyTVar thypes $ M.adjust ((seq_lenses !! pa) .~ v) prog 
-                                                                Parameters ctrl -> when (pa < ntracks) $ modifyTVar thypes $ 
-                                                                        M.adjust ((seq_lenses !! ctrl) .~ v) pa
+                                                                Tracks prog -> when (pa < 31) $ do
+                                                                        modifyTVar thypes $ M.adjust ((seq_lenses !! pa) .~ v) prog 
+                                                                        writeTChan tsupdate prog
+                                                                Parameters ctrl -> when (pa < ntracks) $ do
+                                                                        modifyTVar thypes $ M.adjust ((seq_lenses !! ctrl) .~ v) pa
+                                                                        writeTChan tsupdate pa
                      _ -> return ()
                         
         ) `AlsaExc.catch` \e -> putStrLn $ "alsa_exception: " ++ AlsaExc.show e
@@ -231,77 +289,85 @@ midiIn  thypes tselection tupdate ttmp = (do
 delay = 0.1
 sampledir = "/home/paolino/Music/samples"
 type Params = M.Map String Double
-data Sound = Sound String Double Double Double
-data QueryS = BootSample (IO ()) Sound | PlaySample Sound | DoNo
+
+     
+data Event = Event 
+        { etrack :: Int
+        , etime :: Tempo
+        , esound :: (Int, Double, Int)
+        }
 
 main = do 
-        trr <- boot
-        (lsamples ,samples) <- initSamples  sampledir
+        play <- initSamples  sampledir
         tmp <- newTVarIO $ (1,125,0,0)
-        let tracks = zip [0..] $ map (\_ -> Seq (FP 1 0 0, FP 2 0 0,FP 3 0 0,FP 4 0 0,FP 5 0 0,FP 6 0 0,FP 7 0 0,FP 8 0 0) 0  64 64 2 0 1 0) [0..ntracks - 1]
+        let tracks = zip [0..ntracks - 1] $ repeat noseq 
         thypes <- newTVarIO $ M.fromList tracks 
         tupdate <- newTChanIO 
+        tsupdate <- newTChanIO 
         tprog <- newTVarIO $ (Tracks 0)
-        tplay <- newTVarIO 0
-        forkOS $ midiIn thypes tprog tupdate tmp
+        tevents <- newTVarIO []
+        tstartcycle <- newTVarIO 0
+        forkOS $ midiIn thypes tprog tupdate tsupdate tmp
         forkOS $ midiOut thypes tprog tupdate
-        let z t w samples = do -- duty
+        let     fw = 0.1 -- fire window
+                w = 4 -- pattern cycle
+        let  updateTEvents = forever . atomically $ do 
+                        -- wait for interface change a track parameter 
+                        n <- fmap (`mod` ntracks) (readTChan tsupdate)
+                        s@(Seq fou pres sa pi gr da dila shift) <- fmap (M.! n) (readTVar thypes)
+                        modifyTVar tevents $ \ts -> let 
+                                ts' = filter  ((/=n) . etrack) ts
+                                nes = map (\(t,a) -> Event n t (sa,a,pi)) (sequenza s)
+                                in sortBy (comparing etime) $ nes ++ ts'
+             fireEvents t = do    
                         sleepThreadUntil t -- wait next tick
-                        (n,d,e,dw)  <- atomically $ readTVar tmp
-                        ts <- atomically $ readTVar thypes
-                        let     (samples',qs) = (\f -> mapAccumR f samples $ M.elems ts) $ \samples (Seq fou sa pi gr width da dila shift) -> 
-                                       let      wv = valueW (quo + shift) fou width da
-                                                wpr = valueW (quo + shift) (derivativeFourier fou) width 1
-                                                pw = case  wv of 
-                                                        [] -> 0
-                                                        (x:_) -> abs x
-                                                pr = case  wpr of 
-                                                        [] -> False
-                                                        [_] -> False
-                                                        (x:y:_) -> signum (x * y) <= 0 && y /= 0
-                                                test k s =  if pr && pw > 0 && r == 0 then k $ Sound s  pw (from128 pi - 0.5) (from128 gr - 0.5) else DoNo
-                                                s = sa `mod` lsamples
-                                                (quo,r) = (w + dw)  `divMod` dila
-                                       in case  samples M.! s of
-                                                                Right z -> (samples, test PlaySample z)
-                                                                Left (p,z) -> (M.insert s (Right z) samples, test (BootSample p) z)
-                                solve DoNo = return ()
-                                solve (PlaySample s) = sound trr (t  + delay + e) s
-                                solve (BootSample p s) = p  >> sound trr (t + delay + e) s
-                        mapM_ solve qs -- resolve the harvest and send the bundle
-                        z (t + 60/4/d/n) (w + 1) samples' -- next tick
-        t <- time -- read actual time
-        z t 0 samples 
+                        (t0,ps) <- atomically $ do
+                                t0 <- readTVar tstartcycle
+                                es <- fmap (dropWhile ((< t) . (+t0) . (*w) . etime)) $ readTVar tevents
+                                return $  (t0,takeWhile ((< t) . (+ fw) .(+t0) . (*w) . etime ) es)
+                        forM_ ps $ \(Event _ t (sa,a,pi)) -> play sa (t0 + w*t + delay) a (from128p pi)
+                        fireEvents (t + fw) 
+             updateCycle t n = do
+                        sleepThreadUntil (t + n * w)
+                        atomically $ writeTVar tstartcycle t
+                        updateCycle t (n + 1)
+        
+        now <- time 
+        forkIO $ updateCycle now 0
+        forkIO $ fireEvents now
+        updateTEvents
+        
 
 
 
------------------ Directory ------------------------------
+------------------------------------------------------------------
+---------------- Supecollider zone --------------------------------
+------------------------------------------------------------------
 
 servers = [57110,57111 .. 57117]
 
-initSamples :: FilePath -> IO (Int, M.Map Int (Either (IO (), String) String))
+initSamples :: FilePath -> IO (Int -> Tempo -> Double -> Double -> IO ())
 initSamples sampledir = do
+        forM_ servers $ \i -> withSC3n i . send $ p_new [(1, AddToTail, 0)]
         ls <- map (id &&& takeBaseName)  `fmap` (find (depth ==? 0) (extension ==? ".wav") sampledir)
         print ls
         sequence_ $ do 
                 s <- servers
                 l <- zip [0..] ls
                 return $ uncurry (bootSample s) l
+        let     msamples = M.fromList $ zip [0..] $ map snd ls
+        trr <- newTVarIO $ cycle servers
+        return (\i -> sound trr (msamples M.! (i `mod` length ls))) 
 
-        return (length ls, M.fromList $ zip [0..] $ map (Right . snd) ls)
 
-------------------------------------------------------------------
----------------- Supecollider zone --------------------------------
-------------------------------------------------------------------
-
-sound :: TVar [Int] -> Time -> Sound -> IO ()
-sound trr mt (Sound s amp pitch groove) = do
+sound :: TVar [Int] -> String -> Tempo -> Double -> Double -> IO ()
+sound trr s mt amp pitch = do
         i <- atomically $ do
                 (i:is) <- readTVar trr
                 writeTVar trr is
                 return i
-        print (i,s)
-        withSC3n i . sendBundle . bundle (mt + groove/10) $ [s_new s (-1) AddToTail 1 $ [("amp",amp),("rate",1 + pitch)]]
+        print (i,s,mt,amp,pitch)
+        withSC3n i . sendBundle . bundle mt $ [s_new s (-1) AddToTail 1 $ [("amp",amp),("rate",1 + pitch)]]
         
 bootSample :: Int -> Int -> (FilePath,String) -> IO ()
 bootSample j n (fp,i) = do
@@ -309,10 +375,6 @@ bootSample j n (fp,i) = do
         withSC3n j . send $ d_recv . synthdef i . out 0 $ 
                         control KR "amp" 1 * playBuf 2 AR (fromIntegral n) (control KR "rate" 1) 0 0 NoLoop RemoveSynth  
 
-boot :: IO (TVar [Int])
-boot =  do 
-        forM_ servers $ \i -> withSC3n i . send $ p_new [(1, AddToTail, 0)]
-        newTVarIO $ cycle servers
 {-
         forkIO $ forever $ runInputT  (defaultSettings{ historyFile = Just "waves.hist", autoAddHistory = True}) $ do
                         p <- liftIO $ atomically (readTVar tmp) 
