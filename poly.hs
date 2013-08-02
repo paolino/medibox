@@ -13,6 +13,7 @@ import Data.Monoid
 import Control.Monad
 import System.Console.Haskeline 
 import System.Random
+import System.IO
 
 import qualified Sound.ALSA.Sequencer.Address as Addr
 import qualified Sound.ALSA.Sequencer.Client as Client
@@ -65,50 +66,30 @@ $(makeLenses ''Pat)
 events :: Pat -> [Tempo]
 events (Pat n w s) = every [from128 s + 1 / fromIntegral w / fromIntegral n * fromIntegral j | j <- [0 .. n - 1]] (`floatMod` 1)
 
-data FP = FP 
-        { _ffreq :: Int 
-        , _fpower :: Int
-        , _fphase :: Int
+data HPat = HPat
+        { _hsub :: Int 
+        , _hwidth :: Int
+        , _hphase :: Int
         }
         deriving (Show,Read)
 
 $(makeLenses ''FP)
 
-type  Fourier = M.Map Int FP
 type  Presence = M.Map Int Pat
 
-seno :: FP -> Tempo -> Double
-seno (FP w r k) t =  from128 r * sin (2 * pi * from128 k + fromIntegral w * t)
+collapse x y = abs (x - y) < 1/256 
 
-
-fourier :: Fourier -> Tempo -> Double
-fourier fou t = sum . map (flip seno t) $ M.elems fou
-
-times :: Int -> [Tempo]
-times l = take l $ [0,2*pi/fromIntegral l .. ]
-
-
-schedule :: Presence -> [Tempo]
-schedule pre = sort . concat $ every (M.elems pre) events
-
-
-
-wave :: [Tempo] -> Fourier -> [Double]
-wave ts ims = let   
-        qs = map (fourier ims) $ ts
-        mqs = maximum $ map abs qs
-        in if mqs > 0 then map (/mqs) qs else qs
+schedule :: Presence -> [(Tempo,Int)]
+schedule pre = case sort . concat $ every (M.elems pre) events of
+        [] -> []
+        rs -> map (head &&& length) . groupBy collapse $ rs
 
 
 data Seq = Seq 
-        { _ampl :: Fourier
-        , _pres :: Presence
+        { _pres :: Presence
         , _sample :: Int
         , _pitch :: Int -- pitch
-        , _groove :: Int -- groove
-        --, _width :: Int
         , _damp :: Int
-        , _dilatation :: Int
         , _shift :: Int
         }
         deriving (Show,Read)
@@ -116,22 +97,18 @@ data Seq = Seq
 $(makeLenses ''Seq)
 
 noseq = Seq 
-        (M.fromList $ zip [0..3] $ repeat (FP 1 0 0)) 
-        (M.fromList $ zip [0..3] $ repeat (Pat 0 0 0))
+        (M.fromList $ zip [0..7] $ repeat (Pat 0 1 0))
         0
         64
         64
-        64
-        1
         0
 
 
 sequenza ::  Seq -> [(Tempo,Double)]
-sequenza  (Seq a p s pi gr da di sh) = let 
+sequenza  (Seq p s pi da sh) = let 
         ts = schedule p
-        as = every (wave ts a) (from128 da *)
-        ts' = every ts $ \t ->  from128 sh + (fromIntegral di) *t + from128p gr
-        in zip ts' as
+        m = maximum (map snd ts)
+        in every ts $ \(t,n) ->  (floatMod (from128 sh + t) 1,from128 da * fromIntegral n/fromIntegral m)
 
 nolens  = lens (\_ -> 0) (\s _ -> s)
 
@@ -142,27 +119,27 @@ seq_lenses =
         ,  pres . male 1 . pnumber
         ,  pres . male 2 . pnumber
         ,  pres . male 3 . pnumber
-        ,  ampl . male 0 . ffreq
-        ,  ampl . male 1 . ffreq
-        ,  ampl . male 2 . ffreq
-        ,  ampl . male 3 . ffreq
+        ,  pres . male 4 . pnumber
+        ,  pres . male 5 . pnumber
+        ,  pres . male 6 . pnumber
+        ,  pres . male 7 . pnumber
         ,  pres . male 0 . pwidth
         ,  pres . male 1 . pwidth
         ,  pres . male 2 . pwidth
         ,  pres . male 3 . pwidth
-        ,  ampl . male 0 . fpower
-        ,  ampl . male 1 . fpower
-        ,  ampl . male 2 . fpower
-        ,  ampl . male 3 . fpower
+        ,  pres . male 4 . pwidth
+        ,  pres . male 5 . pwidth
+        ,  pres . male 6 . pwidth
+        ,  pres . male 7 . pwidth
         ,  pres . male 0 . pshift
         ,  pres . male 1 . pshift
         ,  pres . male 2 . pshift
         ,  pres . male 3 . pshift
-        ,  ampl . male 0 . fphase
-        ,  ampl . male 1 . fphase
-        ,  ampl . male 2 . fphase
-        ,  ampl . male 3 . fphase
-        , sample, pitch, groove,  shift,  dilatation, damp
+        ,  pres . male 4 . pshift
+        ,  pres . male 5 . pshift
+        ,  pres . male 6 . pshift
+        ,  pres . male 7 . pshift
+        , sample, pitch, shift, damp
         ]
 
         
@@ -201,7 +178,7 @@ midiOut thypes top tp = (do
                                                                         (Event.Value $ fromIntegral $ prog)
                                                                         )
 
-                        Parameters par ->  case par >= 31 of
+                        Parameters par ->  case par >= 29 of
                                         True -> return ()
                                         False -> do 
                                                 forM_ (M.assocs seqs) $ \(ctrl,prog) -> do
@@ -219,7 +196,6 @@ midiOut thypes top tp = (do
                                                                         (Event.Value $ fromIntegral $ par)
                                                                         )
                 send hypes seq_lenses op
-                print op 
                 ) `AlsaExc.catch` \e -> putStrLn $ "alsa_exception: " ++ AlsaExc.show e
 ntracks = 24
 session  = "current.sxn"
@@ -251,7 +227,6 @@ midiIn  thypes tselection tupdate tsupdate ttmp = (do
                             pa = fromIntegral par
                         zo <- atomically $ readTVar tselection
                         when  (n == regchan) $ do 
-                                 print (par,v,zo)
                                  case pa of 
                                         127 -> atomically $ when (v < ntracks) $ writeTVar tselection (Tracks v) >> writeTChan tupdate ()
                                         126 -> atomically $ when (v < 30) $ writeTVar tselection (Parameters v) >> writeTChan tupdate ()
@@ -289,7 +264,7 @@ midiIn  thypes tselection tupdate tsupdate ttmp = (do
                                                          
                                                         op <- readTVar tselection
                                                         case op of
-                                                                Tracks prog -> when (pa < 31) $ do
+                                                                Tracks prog -> when (pa < 29) $ do
                                                                         modifyTVar thypes $ M.adjust ((seq_lenses !! pa) .~ v) prog 
                                                                         writeTChan tsupdate prog
                                                                 Parameters ctrl -> when (pa < ntracks) $ do
@@ -327,22 +302,19 @@ main = do
         let  updateTEvents = forever . atomically $ do 
                         -- wait for interface change a track parameter 
                         n <- fmap (`mod` ntracks) (readTChan tsupdate)
-                        s@(Seq fou pres sa pi gr da dila shift) <- fmap (M.! n) (readTVar thypes)
-                        modifyTVar tevents $ \ts -> let 
-                                ts' = filter  ((/=n) . etrack) ts
-                                nes = map (\(t,a) -> Event n t (sa,a,pi)) (sequenza s)
-                                in sortBy (comparing etime) $ nes ++ ts'
+                        s@(Seq pres sa pi da shift) <- fmap (M.! n) (readTVar thypes)
+                        modifyTVar tevents $ \ts -> map (\(t,a) -> Event n t (sa,a,pi)) (sequenza s) ++ filter  ((/=n) . etrack) ts
+
              fireEvents _ [] = return ()
              fireEvents t0 ((t1,t2):ts) = do    
                         sleepThreadUntil (t0 + t1) -- wait next tick
-                        let     window f = takeWhile ((< t2) . f). dropWhile ((< t1) . f)
+                        putStr "." >> hFlush stdout
+                        let     window f = filter (\x -> f x >= t1 && f x < t2)
                         ps <- atomically $ fmap (window ((*w) . etime)) $ readTVar tevents
                         forM_ ps $ \(Event _ t (sa,a,pi)) -> play sa (t0 + w*t + delay) a (1 + from128p pi)
-                        print (length ps)
                         fireEvents t0 ts
              updateCycle t n = do
                         sleepThreadUntil (t + n * w)
-                        atomically (readTVar tevents) >>= print
                         forkIO $ fireEvents (t + n * w) $ take fw $ ap zip tail [0,w/fw..]
                         updateCycle t (n + 1)
         
