@@ -1,4 +1,7 @@
 {-# LANGUAGE ViewPatterns #-}
+
+-- | Simple graph, acyclic test, roots, reacheable subset of nodes.
+
 module Graph where
 
 import Data.List 

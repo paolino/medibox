@@ -1,12 +1,15 @@
 
 {-# LANGUAGE TemplateHaskell, NoMonomorphismRestriction, ScopedTypeVariables, GeneralizedNewtypeDeriving #-}       
 
-module Haskell (floatMod, every, Present (..)) where
+module Haskell  where
 
 import Data.Monoid
 import Control.Lens
 import Data.List
 import qualified Data.IntMap 
+import Control.Arrow
+import Control.Monad.State
+import Data.Function (on)
 
 floatMod x y = let
         r = x/y
@@ -19,3 +22,14 @@ class Present a where
 
 instance Present a => Present (Data.IntMap.IntMap a) where
         zero = Data.IntMap.singleton 0 zero
+
+hystogram :: (Num d, RealFrac b) => b -> [(b, d)] -> [(b, d)]
+hystogram m = map (fst . head &&& sum . map snd) . groupBy (collapse m `on` fst) . map (first $ quantize m) where
+        collapse m x y = abs (x - y) < 1/m
+        quantize m = (/m) . fromIntegral . floor . (*m) 
+
+
+mapAccumM f s xs = let 
+        swap (x,y) = (y,x) 
+        f' x s = swap `fmap` f s x
+        in swap `fmap`  runStateT (mapM (StateT . f') xs) s 

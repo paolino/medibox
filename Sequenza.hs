@@ -1,4 +1,4 @@
-{-# LANGUAGE TemplateHaskell, NoMonomorphismRestriction, ViewPatterns, FlexibleInstances, Rank2Types #-}       
+{-# LANGUAGE TemplateHaskell, Rank2Types, NoMonomorphismRestriction, TypeSynonymInstances, FlexibleInstances #-} -- , NoMonomorphismRestriction, ViewPatterns, FlexibleInstances, Rank2Types #-}       
 
 module Sequenza where
 
@@ -17,11 +17,10 @@ import Language.Haskell.TH.Lens
 
 -------------------------------
 import Haskell
-
+import Dynamic
 
 
 from128 x = 1/128 * fromIntegral x
-
 from128p x = from128 x - 0.5
 
 type Tempo = Double
@@ -34,39 +33,42 @@ data Pattern = Pattern
         deriving (Show,Read)
 
 $(makeLenses ''Pattern)
-       
-data Presence = Base {_pattern :: IntMap Pattern} | Higher {_pattern :: IntMap Pattern} deriving (Show,Read)
 
-baseEvents :: Pattern -> [Tempo]
-baseEvents (Pattern n w s) = every [from128 s + 1 / fromIntegral w / fromIntegral n * fromIntegral j | j <- [0 .. n - 1]] (`floatMod` 1)
+instance Present Pattern where
+        zero = Pattern 0 1 0
 
-higherEvents :: IntMap Presence -> Pattern -> [(Tempo,Int)]
-higherEvents mp (Pattern n w s) = case M.lookup n mp of
-        Nothing ->  []
-        Just p -> map (_1 %~ (\x -> (from128 s + x / fromIntegral w) `floatMod` 1)) $ schedule mp p
+-- | A Sequenza is a sum of patterns Int indexed. The Base/Higher tags select if the Sequenza is made of pure patterns or its 'pnumber' are referring to other Sequenzas
+type Sequenza = IntMap Pattern  
+
+-- | A Score is the result of a Sequenza computation
+type Score = [(Tempo,Int)]
+
+-- | A set of interdipendent Sequenza each coupled with its result, for dynamic programming
+type DSequenze = Dynamic Sequenza Sequenza Score 
+
+scoreOfBase :: Sequenza -> Score
+scoreOfBase seq = flip zip (repeat 1) . sort . concat $ every (M.elems seq) baseEvents where
+        baseEvents (Pattern n w s) = every [from128 s + 1 / fromIntegral w / fromIntegral n * fromIntegral j | j <- [0 .. n - 1]] (`floatMod` 1)
+
+scoreOfPointing :: [Score] -> Sequenza -> Score
+scoreOfPointing tss seq = sort . concat $ zipWith pointingEvents (M.elems seq) tss where
+        pointingEvents (Pattern _ w s) = map $ first (\x -> (from128 s + x / fromIntegral w) `floatMod` 1)
+
+seqDeps :: Sequenza -> [Int]
+seqDeps = map _pnumber . M.elems
+
+querySequenza :: DSequenze -> Int -> Maybe (Pointing Sequenza Sequenza,Score,DSequenze)
+querySequenza = query seqDeps scoreOfPointing scoreOfBase 
+
+insertSequenza ::  Int -> Pointing Sequenza Sequenza -> DSequenze -> Maybe DSequenze
+insertSequenza = dyninsert seqDeps
+ 
+
+unsafeMapLens :: Int -> Lens Sequenza Sequenza Pattern Pattern
+unsafeMapLens n = lens (M.! n) (flip $ M.insert n) 
 
 
-schedule :: IntMap Presence -> Presence -> [(Tempo,Int)]
-schedule _ (Base pre) = flip zip (repeat 1) . sort . concat $ every (M.elems pre) baseEvents  
-schedule mp (Higher pre) = sort . concat $ every (M.elems pre) (higherEvents mp)
-
-hystogram :: Double -> [(Tempo,Int)] -> [(Tempo,Int)]
-hystogram m = map (fst . head &&& sum . map snd) . groupBy (collapse m `on` fst) . map (first $ quantize m) where
-        collapse m x y = abs (x - y) < 1/m
-        quantize m = (/m) . fromIntegral . floor . (*m) 
-
-pattern :: IntMap Presence -> Int -> Int -> [(Tempo,Int)]
-pattern mp qm i = hystogram (fromIntegral qm) $ schedule mp (mp M.! i)
-
-unsafeMapLens :: Int -> Lens Presence Presence Pattern Pattern
-unsafeMapLens n = lens f g where
-        f (Base m) = m M.! n
-        f (Higher m) = m M.! n
-        g (Base m) v = Base (M.insert n v m)
-        g (Higher m) v = Higher (M.insert n v m)
-
-
-presence_lenses = 
+sequenza_lenses = 
         [  unsafeMapLens 0 . pnumber
         ,  unsafeMapLens 1 . pnumber
         ,  unsafeMapLens 2 . pnumber
@@ -97,52 +99,8 @@ presence_lenses =
 nolens :: Functor f => (Int -> f Int) -> a -> f a
 nolens = lens (const 0) (\s _ -> s)
 
-instance Present Pattern where
-        zero = Pattern 0 1 0
 
-instance Present Presence where
-        zero = Base $ M.fromList $ zip [0..7] $ repeat zero
+instance Present Sequenza where
+        zero = M.fromList $ zip [0..7] $ repeat zero
 
------------------------------------------------------------
-
-type PM = IntMap Presence
-
--- check deplist correctness
--- a dep list is correct if it has no cycles, it forms an acyclic graph
--- a dep is represented by an ordered tuple, first element is the dependent
-                
-correct [] = True
-correct ys = correct' [Nothing] ys
-
-depsOfPresence (Base ps) = [Nothing]
-depsOfPresence (Higher ps) = every (M.elems ps) $ \(Pattern n _ _) -> Just n
-
-checkPM :: PM -> Bool
-checkPM = correct . concatMap (uncurry zip . (repeat . Just *** depsOfPresence)) . M.assocs 
-
-pointing :: Eq a => a -> [(a,a)] -> [a]
-pointing x [] = []
-pointing x ys = let 
-        (map fst -> zs,ts) = partition ((==x) . snd) ys
-        in zs ++ concatMap (flip pointing ts) zs
-
-roots :: Eq a => [(a,a)] -> [a]
-roots zs = let 
-        (xs,ys) = unzip zs
-        in nub ys \\ xs
-       
-acyclic :: Eq a =>  [(a,a)] -> Bool
-acyclic xs = let 
-        zs = roots xs
-        in acyclicFrom zs xs
-
-acyclicFrom xs ys = let 
-        (ms,us) = partition ((`elem` xs) . snd)  ys
-        in case us of 
-                [] -> True
-                us -> case map fst us `intersect` xs of 
-                        [] ->  case ms of 
-                                [] -> False 
-                                ms -> acyclicFrom (map fst ms ++ xs) us
-                        _ -> False
 
