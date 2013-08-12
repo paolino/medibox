@@ -20,8 +20,6 @@ every = flip map
 class Present a where
         zero :: a
 
-instance Present a => Present (Data.IntMap.IntMap a) where
-        zero = Data.IntMap.singleton 0 zero
 
 hystogram :: (Num d, RealFrac b) => b -> [(b, d)] -> [(b, d)]
 hystogram m = map (fst . head &&& sum . map snd) . groupBy (collapse m `on` fst) . map (first $ quantize m) where

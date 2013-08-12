@@ -44,7 +44,7 @@ type Sequenza = IntMap Pattern
 type Score = [(Tempo,Int)]
 
 -- | A set of interdipendent Sequenza each coupled with its result, for dynamic programming
-type DSequenze = Dynamic Sequenza Sequenza Score 
+type DSequenze = Dynamic Sequenza Score 
 
 scoreOfBase :: Sequenza -> Score
 scoreOfBase seq = flip zip (repeat 1) . sort . concat $ every (M.elems seq) baseEvents where
@@ -57,10 +57,10 @@ scoreOfPointing tss seq = sort . concat $ zipWith pointingEvents (M.elems seq) t
 seqDeps :: Sequenza -> [Int]
 seqDeps = map _pnumber . M.elems
 
-querySequenza :: DSequenze -> Int -> Maybe (Pointing Sequenza Sequenza,Score,DSequenze)
+querySequenza :: DSequenze -> Int -> Maybe (Pointing Sequenza,Score,DSequenze)
 querySequenza = query seqDeps scoreOfPointing scoreOfBase 
 
-insertSequenza ::  Int -> Pointing Sequenza Sequenza -> DSequenze -> Maybe DSequenze
+insertSequenza ::  Int -> Pointing Sequenza -> DSequenze -> Maybe DSequenze
 insertSequenza = dyninsert seqDeps
  
 
@@ -103,4 +103,5 @@ nolens = lens (const 0) (\s _ -> s)
 instance Present Sequenza where
         zero = M.fromList $ zip [0..7] $ repeat zero
 
-
+instance Present DSequenze where
+        zero = M.empty 

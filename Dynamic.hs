@@ -1,16 +1,27 @@
+{-# LANGUAGE TemplateHaskell #-}
+
 module Dynamic where 
 
 import Prelude hiding (lookup)
 import Data.IntMap hiding (map, foldr)
+import Control.Lens
 
 import Graph (acyclic, pointing, Graph)
 import Haskell (mapAccumM)
 
-data Pointing a b = Pointing b | Base a 
 
-type Dynamic a b c = IntMap (Pointing a b , Maybe c)
+data Pointing a 
+        =  Pointing {_core :: a } 
+        |  Base { _core :: a } 
+        deriving (Show, Read)
 
-query :: (b -> [Int]) -> ([c] -> b -> c) -> (a -> c) -> Dynamic a b c -> Int -> Maybe (Pointing a b , c, Dynamic a b c)
+$(makeLenses ''Pointing)
+
+
+
+type Dynamic a c = IntMap (Pointing a , Maybe c)
+
+query :: (a -> [Int]) -> ([c] -> a -> c) -> (a -> c) -> Dynamic a c -> Int -> Maybe (Pointing a , c, Dynamic a c)
 query fd fp fb d k = do 
         let positive d p y = (p, y, insert k (p,Just y) d) 
         r <-  k `lookup` d 
@@ -25,10 +36,10 @@ query fd fp fb d k = do
                 (p,Just y) -> return $ positive d p y 
 
 
-touch :: [Int] -> Dynamic a b c -> Dynamic a b c
+touch :: [Int] -> Dynamic a c -> Dynamic a c
 touch ks d = foldr (adjust (\(x,_) -> (x,Nothing))) d ks 
 
-dyninsert :: (b -> [Int]) -> Int -> Pointing a b -> Dynamic a b c -> Maybe (Dynamic a b c)
+dyninsert :: (a -> [Int]) -> Int -> Pointing a -> Dynamic a c -> Maybe (Dynamic a c)
 dyninsert fd k p d = let
         d' = insert k (p,Nothing) d
         g = dyndeps fd d'
@@ -36,7 +47,7 @@ dyninsert fd k p d = let
                 Just $ touch (pointing k g) d'
                 else Nothing
 
-dyndeps :: (b -> [Int]) -> Dynamic a b c -> Graph Int
+dyndeps :: (a -> [Int]) -> Dynamic a c -> Graph Int
 dyndeps fd d = assocs d >>= f where
         f (_,(Base _,_)) = []
         f (k1, (Pointing x, _)) = map ((,) k1) (fd x)

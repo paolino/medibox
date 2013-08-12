@@ -1,5 +1,5 @@
 {-# LANGUAGE ViewPatterns #-}
-module Midi where
+module Midi2 where
 
 import Control.Concurrent.STM
 import Control.Concurrent
@@ -22,17 +22,18 @@ import qualified Sound.ALSA.Sequencer.Connect as Connect
 import System.IO 
 import Control.Lens
 
+import Dynamic (query, Pointing (..), core)
 import Sequenza 
 import PersistentChoiceLens
-import Query
 
 type Mem a = TVar (IM.IntMap a)
 
 
 regchan = 0 
+
 -- send out the state of the selected track or parameter
-midiOut :: Mem (SSample Projection) -> Mem (SControllo Projection) -> Mem Presence ->  TVar (PersistentChoice PInt) -> TChan () -> Query SBus -> IO ()
-midiOut tssample tscontrollo tpresence (Query rq _ _) top tp = (do
+midiOut :: TVar DSequenze  ->  TVar (PersistentChoice PInt) -> TChan () -> IO ()
+midiOut  tpresence  top tp = (do
   SndSeq.withDefault SndSeq.Block $ \h -> do
         Client.setName (h :: SndSeq.T SndSeq.OutputMode) "waves"
         c <- Client.getId h
@@ -43,24 +44,25 @@ midiOut tssample tscontrollo tpresence (Query rq _ _) top tp = (do
                 op <- atomically $ readTVar top
                 print (op ^. persistentChoice)
                 case op ^. persistentChoice of
+                        -- patterns are selected
                         A prog -> do
                                 seqs <- atomically $ readTVar tpresence
-                                case IM.lookup (fromIntegral prog) seqs of
+                                case querySequenza seqs (fromIntegral prog) of
                                         Nothing -> return ()
-                                        Just s -> do 
-                                                forM_ (zip [0..23] presence_lenses) $ \(par,ml) -> do
+                                        Just (ps,_,_) -> do
+                                                forM_ (zip [0..23] sequenza_lenses) $ \(par,ml) -> do
                                                         let ev =  Event.forConnection (Connect.toSubscribers (Addr.Cons c p)) $ 
                                                                         Event.CtrlEv Event.Controller (Event.Ctrl 
                                                                                 (Event.Channel $ fromIntegral regchan) 
                                                                                 (Event.Parameter $ fromIntegral par) 
-                                                                                (Event.Value $ fromIntegral $ s ^. ml)
+                                                                                (Event.Value $ fromIntegral $ ps ^. core . ml)
                                                                                 )
                                                         void $ Event.outputDirect h $ ev 
                                                 void $ Event.outputDirect h $  Event.forConnection (Connect.toSubscribers (Addr.Cons c p)) $ 
                                                                 Event.CtrlEv Event.Controller (Event.Ctrl 
                                                                         (Event.Channel $ fromIntegral regchan) 
                                                                         (Event.Parameter $ fromIntegral 117) 
-                                                                        (Event.Value $ fromIntegral $ case s of 
+                                                                        (Event.Value $ fromIntegral $ case ps of 
                                                                                 Base _ -> 0
                                                                                 _ -> 127)
                                                                         )
@@ -110,18 +112,16 @@ session  = "current.sxn"
 
 -- wait an event , modify the state or the selection and send an update in case
 -- midiIn :: TVar (M.Map Int Sequenza) -> TVar Selection -> TChan () -> TVar (Double,Double,Int)
-
 bootMidi tpresence tssample tscontrollo ttmp qu = do
         tdeps <- newTVarIO []
         tupdate <- newTChanIO 
         tselection <- newTVarIO zero :: IO (TVar (PersistentChoice PInt))
-        forkOS $ midiIn tssample tscontrollo tpresence tselection tupdate ttmp tdeps qu
-        forkOS $ midiOut tssample tscontrollo tpresence tselection tupdate qu
+        forkOS $ midiIn tpresence tselection tupdate        
+        forkOS $ midiOut  tpresence tselection tupdate 
 
-midiIn :: Mem (SSample Projection) -> Mem (SControllo Projection) -> Mem Presence 
-                -> TVar (PersistentChoice PInt) -> TChan () -> TVar (Double,Double,Double,Int) -> TVar [(Int,Int)] -> Query SBus -> IO ()
-midiIn  tssample tscontrollo tpresence  tselection tupdate ttmp tdeps (Query _ sq _) = (do
-  tcopy <- newTVarIO zero
+midiIn ::TVar DSequenze -> TVar (PersistentChoice PInt) -> TChan () -> IO ()
+midiIn  tpresence  tselection tupdate  = (do
+  -- tcopy <- newTVarIO zero
   SndSeq.withDefault SndSeq.Block $ \h -> do
         Client.setName (h :: SndSeq.T SndSeq.InputMode) "Ws"
         c <- Client.getId h
@@ -142,6 +142,7 @@ midiIn  tssample tscontrollo tpresence  tselection tupdate ttmp tdeps (Query _ s
                                         127 -> atomically $ do 
                                                 modifyTVar tselection $ (choice .~ PInt v)
                                         126 -> atomically $ modifyTVar tselection nextChoice
+                                        {-
                                         125 -> atomically $ modifyTVar ttmp $ \(n,sp,sh,ph) -> (n,n * fromIntegral v,sh,ph)
                                         124 -> atomically $ modifyTVar ttmp $ \(n,sp,sh,ph) -> (n,sp,(fromIntegral v / 128) * 15 / sp / n,ph)
                                         123 -> atomically $ modifyTVar ttmp $ \(n,sp,sh,ph) -> (n,sp,sh,v)
@@ -189,35 +190,44 @@ midiIn  tssample tscontrollo tpresence  tselection tupdate ttmp tdeps (Query _ s
                                                                                 _ -> s
                                                                         _ -> return ()
                                                         _ -> return ()
-                                    
+                                        -}
                                         _ ->   atomically $ do
                                                         op <- readTVar tselection
                                                         case op ^. persistentChoice of
-                                                                A (PInt prog) -> 
-                                                                        case pa of 
-                                                                                 0 -> do
-                                                                                        ds <- readTVar tdeps
-                                                                                        r <- fmap ((IM.! prog)) $ readTVar tpresence
+                                                                A (PInt prog) -> do
+                                                                        seqs <- readTVar tpresence
+                                                                        case querySequenza seqs (fromIntegral prog) of
+                                                                                Nothing -> return ()
+                                                                                Just (ps,_,_) -> do 
+                                                                                        when (pa < 24) $ let 
+                                                                                                mseqs = insertSequenza prog 
+                                                                                                        ((core . (sequenza_lenses !! pa) .~  v) ps)
+                                                                                                        seqs
+                                                                                                in
+                                                                                                case mseqs of   
+                                                                                                        Nothing -> return ()
+                                                                                                        Just seqs -> writeTVar tpresence seqs
+                                                                                        when (pa == 24) $ let
+                                                                                                setBase (Pointing x) =  Base x
+                                                                                                setBase x = x
+                                                                                                setPointing (Base x) = Pointing x
+                                                                                                setPointing x = x
+                                                                                                mseqs = flip (insertSequenza prog) seqs $ (if v == 0 then setBase else setPointing) $ ps
+                                                                                                in
+                                                                                                case mseqs of   
+                                                                                                        Nothing -> return ()
+                                                                                                        Just seqs -> writeTVar tpresence seqs
 
-                                                                                        case r of
-                                                                                                Higher _ -> do 
-                                                                                                        let ds' = (prog,v) : filter ((/= prog) . fst) ds
-                                                                                                        when (correct prog ds') $ do
-                                                                                                                writeTVar tdeps ds' 
-                                                                                                                modifyTVar tpresence $ 
-                                                                                                                        IM.adjust ((presence_lenses !! pa) .~ v) prog 
-                                                                                                Base _ ->  modifyTVar tpresence $ 
-                                                                                                        IM.adjust ((presence_lenses !! pa) .~ v) prog 
-                                                                                 _ -> modifyTVar tpresence $ IM.adjust ((presence_lenses !! pa) .~ v) prog 
-                                                                B (PInt prog) -> modifyTVar tssample $ IM.adjust ((ssample_lenses !! pa) .~ v) $  prog 
-                                                                C (PInt prog) ->  modifyTVar tscontrollo $ IM.adjust ((scontrollo_lenses !! pa) .~ v) $ prog 
-                                                                D (PInt prog) ->  sq (prog,((scontrollo_lenses !! pa) .~ v))
+                                                                _ -> return ()
+--                                                                B (PInt prog) -> modifyTVar tssample $ IM.adjust ((ssample_lenses !! pa) .~ v) $  prog 
+--                                                                C (PInt prog) ->  modifyTVar tscontrollo $ IM.adjust ((scontrollo_lenses !! pa) .~ v) $ prog 
+ --                                                               D (PInt prog) ->  sq (prog,((scontrollo_lenses !! pa) .~ v))
                                         
                                  op <- atomically $ readTVar tselection
                                  case op ^. persistentChoice of
                                         A (PInt prog) -> atomically (fmap ((IM.! prog)) (readTVar tpresence)) >>= print
-                                        B (PInt prog) -> atomically (fmap ((IM.! prog)) (readTVar tssample)) >>= print
-                                        C (PInt prog) -> atomically (fmap ((IM.! prog)) (readTVar tscontrollo)) >>= print
+--                                        B (PInt prog) -> atomically (fmap ((IM.! prog)) (readTVar tssample)) >>= print
+--                                        C (PInt prog) -> atomically (fmap ((IM.! prog)) (readTVar tscontrollo)) >>= print
                                  atomically $ writeTChan tupdate ()
                      _ -> return ()
                         
