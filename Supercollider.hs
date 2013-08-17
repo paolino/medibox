@@ -15,11 +15,12 @@ import System.Directory
 
 import Realize
 import Sequenza
+import Instr
 
 withSC3n :: Int -> Connection UDP a -> IO a
 withSC3n i = withTransport (openUDP "127.0.0.1" $ fromIntegral i)
 
-servers = [57110]
+servers = [57110 .. 57117]
 
 data CtxSamples = CtxSamples (Int -> String) Int
 
@@ -35,34 +36,47 @@ bootSample :: Int -> (Int,(FilePath,String)) -> IO ()
 bootSample j (n,(fp,i)) = do
         withSC3n j . send $ b_free n
         withSC3n j . send $ b_allocRead n fp 0 0
-        withSC3n j . send $ d_recv . synthdef i . out (privates + control KR "outbus" 0) $ 
-                        control KR "amp" 1 * playBuf 2 AR (fromIntegral n) (control KR "rate" 1) 0 0 NoLoop RemoveSynth  
-initSamples :: FilePath -> IO (SSample Projection -> Playable)
+        withSC3n j . send $ d_recv . synthdef i . out (control KR "outbus" 0) $ 
+                        0.5 * control KR "amp" 1 * playBuf 2 AR (fromIntegral n) (0.5 + 1.5 * control KR "rate" 0) 0 0 NoLoop RemoveSynth  
+bootLPF :: Int -> String -> IO ()
+bootLPF j i = do
+        let     e_d = envPerc (control KR "amp" 0) (control KR "amp" 0 * 3)
+                e = envGen AR 1 1 0 1 RemoveSynth e_d
+        withSC3n j . send $ d_recv . synthdef i . out (control KR "outbus" 4) $ 
+                        e * ( lpf (in' 2 AR $ privates + control KR "inbus" 0) $ 30 + 1000 *(control KR "rate" 0))
+
+
+initSamples :: FilePath -> IO (SSample Int -> Playable)
 initSamples sampledir = do
         putStrLn "Reading samples"
         sampledir <- getCurrentDirectory
         forM_ servers $ \i -> withSC3n i . send $ p_new [(1, AddToTail, 0)]
         ls <- map (id &&& takeBaseName)  `fmap` (find (depth ==? 0) (extension ==? ".wav") sampledir)
-        
         sequence_ $ do 
                 j <- servers
                 l <- zip [0..] ls
                 return $ bootSample j l
-        let     msamples = IM.fromList $ zip [0..] $ map snd ls
+        sequence_ $ do 
+                j <- servers
+                l <- ["lpf1","lpf2","lpf3","lpf4","lpf5"]
+                return $ bootLPF j l
+
+        let     msamples = IM.fromList $ zip [0..] $ map snd ls ++ ["lpf1","lpf2","lpf3","lpf4","lpf5"]
         mapM_ print $ IM.assocs msamples
         trr <- newTVarIO $ cycle servers
-        let fs i = msamples IM.! (i `mod` length ls)
+        let fs i = msamples IM.! (i `mod` IM.size msamples)
         return $ \s -> Playable (ctxSamples trr fs, s)
 
 instance Play (SSample Double) where
         type Ctx (SSample Double) = CtxSamples
-        play (CtxSamples f i) e@(Event t (SSample vo pi sa out)) = do
+        play (CtxSamples f i) e@(Event t (SSample vo pi sa inb out)) = do
                 print e
-                withSC3n i . sendBundle . bundle t $ [s_new (f sa) (-1) AddToHead 1 $ [("amp",vo),("rate",pi),("outbus",fromIntegral out)]]
+                withSC3n i . sendBundle . bundle t $ [s_new (f sa) (-1) AddToHead 1 $ [("amp",vo),("rate",pi),("inbus", fromIntegral inb), ("outbus",fromIntegral out)]]
 
-                
+  
+              
 privates = numOutputBuses + numInputBuses
-
+{-
 filters  = 
         [       ("lpf1" , \input -> lpf input $ 30 + 10000 *(control KR "p1" 1))
       
@@ -89,13 +103,7 @@ initFilters = do
                         sleepThread 0.1
                         withSC3n j . send $ n_free [i] 
                         withSC3n j . send $ s_new n i AddToTail 1 []    
-        sequence_ $ do 
-                j <- servers
-                -- identity filter, from 0 private to 0 hardware
-                return $ do 
-                        withSC3n j . send $ d_recv $ synthdef "ouput" $ out 0 $ (in' 2 AR $ privates)
-                        sleepThread 0.1
-                        withSC3n j . send $ s_new "ouput" (-1) AddToTail 1 []    
+
                         
         
         return $ \s -> Playable (return $ CtxFilters (), s)
@@ -113,4 +121,4 @@ instance Direct SBus where
                 forM_ servers $ \j -> 
                         withSC3n j . send  $ (n_set (f + 1000) $ [("inbus",fromIntegral i),("outbus",fromIntegral o)])
         direct Nothing (SBus i o) = return ()
-                
+-}              

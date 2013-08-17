@@ -41,23 +41,23 @@ instance Present Pattern where
 type Sequenza = IntMap Pattern  
 
 -- | A Score is the result of a Sequenza computation
-type Score = [(Tempo,Int)]
+type Score a = [(Tempo, a)]
 
 -- | A set of interdipendent Sequenza each coupled with its result, for dynamic programming
-type DSequenze = Dynamic Sequenza Score 
+type DSequenze = Dynamic Sequenza (Score Int)
 
-scoreOfBase :: Sequenza -> Score
+scoreOfBase :: Sequenza -> Score Int
 scoreOfBase seq = flip zip (repeat 1) . sort . concat $ every (M.elems seq) baseEvents where
         baseEvents (Pattern n w s) = every [from128 s + 1 / fromIntegral w / fromIntegral n * fromIntegral j | j <- [0 .. n - 1]] (`floatMod` 1)
 
-scoreOfPointing :: [Score] -> Sequenza -> Score
+scoreOfPointing :: [Score Int] -> Sequenza -> Score Int
 scoreOfPointing tss seq = sort . concat $ zipWith pointingEvents (M.elems seq) tss where
         pointingEvents (Pattern _ w s) = map $ first (\x -> (from128 s + x / fromIntegral w) `floatMod` 1)
 
 seqDeps :: Sequenza -> [Int]
 seqDeps = map _pnumber . M.elems
 
-querySequenza :: DSequenze -> Int -> Maybe (Pointing Sequenza,Score,DSequenze)
+querySequenza :: DSequenze -> Int -> Maybe (Pointing Sequenza,Score Int,DSequenze)
 querySequenza = query seqDeps scoreOfPointing scoreOfBase 
 
 insertSequenza ::  Int -> Pointing Sequenza -> DSequenze -> Maybe DSequenze
