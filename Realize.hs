@@ -1,4 +1,4 @@
-{-# LANGUAGE ExistentialQuantification, TypeFamilies, GADTs, FlexibleContexts #-}
+{-# LANGUAGE TemplateHaskell, ExistentialQuantification, TypeFamilies, GADTs, FlexibleContexts #-}
 module Realize where
 
 import Sequenza
@@ -8,34 +8,27 @@ import Control.Monad
 import Sound.OSC
 import System.IO
 import Control.Arrow
+import Control.Lens
 
 
-data Event a = Event 
-        { _etime :: Time
-        , _event :: a
-        }        
-        deriving (Show,Read)
+type Track = (Int,Int)
 
-type ScoreH = Score (Double, Double -> Double)
+data Realize a = Realize {
+        _track :: Track
+        , _what :: a
+        } deriving (Show,Read)
 
-holdFromScore :: Score a -> Double -> a
-holdFromScore ys x = snd . last . takeWhile ((< (x + 1)) . fst) . concat . iterate (map $ first (+1)) $ ys
-
-
-
-type QueryScore m = Int -> m (Score Double)
-
-class Realize t where
-        type  EventR t 
-        realize :: forall m . Monad m => QueryScore m -> t -> m [Event (EventR t)]
+$(makeLenses ''Realize)
+type QueryScore m = Track -> m (Score Double)
 
 
 class Play a where 
         type Ctx a 
-        play :: Ctx a -> Event a -> IO ()
+        play :: Ctx a -> (Tempo , (Double,a)) -> IO ()
+
 
 data Playable where 
-        Playable ::  (Show t, Realize t, Play (EventR t))  => (IO (Ctx (EventR t)), t) -> Playable
+        Playable ::  (Show a, Play a)  => (IO (Ctx a), Realize a) -> Playable
 
 data Globals = Globals 
         { _delay :: Tempo
@@ -43,17 +36,19 @@ data Globals = Globals
         , _subdivision :: Int
         }
 
+realize :: (Functor m, Monad m) => QueryScore m -> Realize a -> m (Score  (Double,a))
+realize f (Realize t x) =  map (second (\v -> (v,x))) `fmap` f t
 
-output :: (Tempo, Tempo) -> (Tempo -> Tempo) -> (Int -> IO (Score Double)) -> [Playable] -> IO () 
+output :: (Tempo, Tempo) -> (Tempo -> Tempo) -> QueryScore IO  -> [Playable] -> IO () 
 output (t1,t2) ft pres es = do
         forM_ es $ \(Playable (ctx,e)) -> do
                 rs <- realize pres e
-                forM_ rs $ \(Event t x) ->  do
+                forM_ rs $ \(t, x) ->  do
                         when (t < t2 && t >= t1) $ do
                                 c <- ctx
-                                play c $ Event (ft t) x
+                                play c $ (ft t, x)
 
-outputCycle :: Tempo -> (Int -> IO (Score Double)) -> IO Globals -> IO [Playable] -> IO ()
+outputCycle :: Tempo -> QueryScore IO -> IO Globals -> IO [Playable] -> IO ()
 outputCycle t0 ioscore g f = do 
         Globals del per sub <- g
         let     dl = 1 / fromIntegral sub

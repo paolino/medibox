@@ -2,6 +2,7 @@
 import Control.Concurrent.STM
 import Control.Concurrent
 import Data.List 
+import System.Directory
 
 import qualified Data.IntMap as IM
 import Control.Arrow
@@ -57,18 +58,24 @@ main = do
         (killInterface, tselection) <- interface interfaceIn interfaceOut tpresence
         -- outputCycle :: Tempo -> (Int -> IO (Score Double)) -> IO Globals -> IO [Playable] -> IO ()
         t0 <- time
-        let serveProj i = atomically $ do
+        let serveProj (pi,si) = atomically $ do
                         Interface seqs projs ssamples <-  readTVar tpresence
-                        let     proj = projs IM.! i
-                                (rs,nseqs) = project seqs proj
-                        writeTVar tpresence $ Interface nseqs projs ssamples
-                        return rs
+                        let     proj = projs IM.! pi
+                                
+                        case querySequenza seqs si of
+                                Nothing -> return []
+                                Just (_,sc,nseqs) -> do 
+                                        writeTVar tpresence $ Interface nseqs projs ssamples
+                                        return $ project sc proj
             players = atomically $ do 
                         Interface seqs projs ssamples <-  readTVar tpresence
                         return $ map ssamples2Playable $ IM.elems ssamples
                 
-        v <- readFile  "current.medibox"
-        atomically $ writeTVar tpresence $ read v
+        t <- doesFileExist "current.medibox"
+        when t $ do 
+                v <- readFile  "current.medibox"
+                atomically $ writeTVar tpresence $ read v
+        
         forkIO $ outputCycle  (t0 + 1) serveProj (return $ Globals 0.1 4 100) players 
         forkIO . forever $ do 
                 sleepThread 5

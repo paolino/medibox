@@ -6,38 +6,46 @@ import Language.Haskell.TH.Lens
 import Projections
 import Haskell
 import Realize
+import Control.Monad
 
 
-
-data SSample a = SSample 
-        { _volume :: a
-        , _pitch :: a
-        , _sample :: Int
+data Synth = Synth 
+        {  _synth :: Int
         , _sinbus :: Int
         , _soutbus :: Int
+        , _p1   :: Int
+        , _p2 :: Int
+        , _p3 :: Int
+        , _p4 :: Int
+        , _p5 :: Int
+        , _p6 :: Int
         }
         deriving (Show,Read)
 
-$(makeLenses ''SSample)
-ssample_lenses :: Functor f => [(Int -> f Int) -> (SSample Int) -> f (SSample Int)]
-ssample_lenses = [volume,pitch,sample,soutbus]
+$(makeLenses ''Synth)
 
-instance Present (SSample Int) where
-        zero = SSample 0 0 0 0 0
+data SControl = SControl {
+        _coutbus :: Int
+        }
+        deriving (Show,Read)
 
-instance Realize (SSample Int) where 
-        type EventR (SSample Int) = SSample Double
-        realize pres (SSample vo pi sa ib ob) = do 
-                vos <- pres vo
-                pis <- pres pi
-                let     f _ [] _ = []
-                        f pi ((tvo,vo):vos) [] = Event tvo (SSample vo  pi sa ib ob): f pi vos []
-                        f pi' ((tvo,vo):vos) ((tpi,pi):pis) 
-                                | tvo < tpi = Event tvo (SSample vo pi sa ib ob): f pi' vos ((tpi,pi):pis)
-                                | otherwise = f pi ((tvo,vo):vos) pis
-                return $ case pis of
-                        [] -> []
-                        pis -> f (snd $ last pis) vos pis
+$(makeLenses ''SControl)
+
+        
+
+
+synth_lenses :: Functor f => [(Int -> f Int) -> Synth -> f Synth ]
+synth_lenses = [synth, sinbus , soutbus,p1,p2,p3,p4,p5,p6]
+
+instance Present a => Present (Realize a) where
+        zero = Realize (0,0) $ zero
+
+instance Present Synth where
+        zero = Synth  0 0 0 0 0 0 0 0 0
+
+instance Present SControl where
+        zero = SControl 0
+
 {-
 data SControllo a = SControllo
         { _cfilter :: Int
