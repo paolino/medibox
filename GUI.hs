@@ -22,26 +22,22 @@ import PersistentChoiceLens
 import Control.Lens  hiding (set)
 import Projections
 import Instr
+import Realize
 
 k = 1/128
 
 
-patternDraw i dr tpresence tsel = do 
+patternDraw dr mn tpresence tsel = do 
         ds <- atomically $ do
-                sel <- readTVar tsel
-                case sel ^. persistentChoice of
-                        A (PInt prog) -> do                        
-                                Interface seqs projs ssamples <- readTVar tpresence
-                                let     ssample = ssamples IM.! fromIntegral prog
-                                        (is, proj) = case i of
-                                                0 -> (ssample ^. volume . _2, projs IM.! (ssample ^. volume . _1))
-                                                1 -> (ssample ^. pitch . _2, projs IM.! (ssample ^. pitch . _1))
-                                case querySequenza seqs is  of
-                                        Nothing -> return Nothing
-                                        Just (_,sc,nseqs) -> do             
-                                                writeTVar tpresence $ Interface nseqs projs ssamples
-                                                return $ Just $ project  sc proj
-                        _ -> return Nothing
+                mpg <- readTVar tsel
+                let prog = mpg IM.! mn
+                Interface seqs projs ssamples <- readTVar tpresence
+                let     Realize (i,j) ssample = ssamples IM.! fromIntegral prog
+                case querySequenza seqs j  of
+                        Nothing -> return Nothing
+                        Just (_,sc,nseqs) -> do             
+                                writeTVar tpresence $ Interface nseqs projs ssamples
+                                return $ Just $ project sc (projs IM.! i)
         case ds of 
                 Just ds -> do 
                           wdr <- widgetGetDrawWindow dr
@@ -56,8 +52,8 @@ patternDraw i dr tpresence tsel = do
                 Nothing -> return ()
 
 
-gui :: TChan (Int,Int) -> TChan (Int,Int) ->  TVar Interface -> TVar (PersistentChoice PInt) -> IO ()
-gui midiinchan midioutchan tseq tselection = do
+gui :: (Int ->  String) -> TChan (Int,Int) -> TChan (Int,Int) ->  TVar Interface -> TVar (IM.IntMap Int) -> IO ()
+gui snames midiinchan midioutchan tseq tselection = do
   thandle <- newTVarIO Nothing
 
 
@@ -67,38 +63,51 @@ gui midiinchan midioutchan tseq tselection = do
   mbox <- hBoxNew True 1 
   set window [windowDefaultWidth := 200, windowDefaultHeight := 200,
                           containerBorderWidth := 10, containerChild := mbox]
-  box    <- hBoxNew False 1
-  frame <- frameNew 
-  set frame [containerChild:= box]
-  boxPackStart mbox frame PackGrow 0
-  controllo midiinchan midioutchan Nothing box $ 127
-  forM_ [64..70] $ \i -> controllo midiinchan midioutchan Nothing box $ i
-  forM_ [0..1] $ \proj -> do
+  forM_ [0..2] $ \mn -> do
+          let sh x = mn * 41 + x
+
           vbox    <- vBoxNew False 1
           frame <- frameNew 
           set frame [containerChild:= vbox]
           boxPackStart mbox frame PackGrow 0
+          synth <- labelNew  $ Just "synthname"
+          frame <- frameNew 
+          set frame [containerChild:= synth]
+          boxPackStart vbox frame PackNatural 0
+
+          box    <- hBoxNew False 1
+          frame <- frameNew 
+          set frame [containerChild:= box]
+          boxPackStart vbox frame PackGrow 0
+          controllo midiinchan midioutchan Nothing box (const $ return ()) $ sh 40
+          forM_ [sh 29..sh 30] $ \i -> controllo midiinchan midioutchan Nothing box (const $ return ()) $ i
+          controllo midiinchan midioutchan Nothing box (\v -> labelSetText synth $ snames v) $ sh 31
+          forM_ [sh 32..sh 39] $ \i -> controllo midiinchan midioutchan Nothing box (const $ return ()) $ i
+
           bbox <- hBoxNew False 1
           frame <- frameNew 
           set frame [containerChild:= bbox]
           boxPackEnd vbox frame PackGrow 0
           dr <- drawingAreaNew
-          dr `on`  exposeEvent $  do liftIO $ patternDraw proj dr tseq tselection >> return True
-          forkIO . forever $ do sleepThread 0.05 >> postGUIAsync (widgetQueueDraw dr)
+          dr `on`  exposeEvent $  do liftIO $ patternDraw dr mn tseq tselection >> return True
+          forkIO . forever $ do sleepThread 0.1 >> postGUIAsync (widgetQueueDraw dr)
           boxPackEnd bbox dr PackGrow 0
+
           forM_ [0..2] $ \paramt -> do
-             pbox <- hBoxNew True 1
+             pbox <- hBoxNew False 1
              frame <- frameNew 
              set frame [containerChild:= pbox]
 
              boxPackStart vbox frame PackGrow 0
-             forM_ [0..7] $ \params -> controllo midiinchan midioutchan (Just dr) pbox $ proj * 32 + paramt * 8 + params
-          pbox <- hBoxNew True 1
+             forM_ [0..7] $ \params -> controllo midiinchan midioutchan (Just dr) pbox (const $ return ()) $  sh $ paramt * 8 + params
+
+          pbox <- hBoxNew False 1
           frame <- frameNew 
           set frame [containerChild:= pbox]
-
           boxPackStart vbox frame PackGrow 0
-          forM_ [0..4] $ \paramv -> controllo midiinchan midioutchan (Just dr) pbox $ proj * 32 + paramv + 24
+          forM_ [0..4] $ \paramv -> controllo midiinchan midioutchan (Just dr) pbox (const $ return ()) $  sh $ paramv + 24
+
+
   onDestroy window mainQuit
   widgetShowAll window
   mainGUI
@@ -115,11 +124,12 @@ controllo
      -> TChan (Int, Int)
      -> Maybe DrawingArea
      -> self
+     -> (Int -> IO ())
      -> Int
      -> IO (ConnectId ProgressBar)
-controllo midiinchan midioutchan dr pbox paramv = do
+controllo midiinchan midioutchan dr pbox supp paramv = do
           hbox    <- vBoxNew False 1
-          widgetSetSizeRequest hbox 30 60
+          widgetSetSizeRequest hbox 33 60
           boxPackStart pbox hbox PackNatural 0
 
           param <- labelNew (Just $ show paramv)
@@ -148,6 +158,7 @@ controllo midiinchan midioutchan dr pbox paramv = do
                         case tp == paramv of 
                                 False -> return ()
                                 True ->  postGUISync $ do 
+                                        supp wx
                                         wx' <- read `fmap` (labelGetText label)
                                         case  wx' /= wx of
                                                 False -> return ()
@@ -166,6 +177,7 @@ controllo midiinchan midioutchan dr pbox paramv = do
                         atomically $ writeTChan midioutchan (paramv,floor $ y/k)
                         labelSetText label $ show (floor $ y/k)
                         labelSetText memory $ show (0,r)
+                        supp $ floor $ y/k
                 return True
           on level scrollEvent $  tryEvent $ do 
                 ScrollUp <- eventScrollDirection
@@ -175,6 +187,7 @@ controllo midiinchan midioutchan dr pbox paramv = do
                         atomically $ writeTChan midioutchan (paramv,floor $ y/k)
                         progressBarSetFraction level y
                         labelSetText label $ show (floor $ y/k)
+                        supp $ floor $ y/k
           on level scrollEvent $  tryEvent $ do 
                 ScrollDown <- eventScrollDirection
                 liftIO $ do 
@@ -183,6 +196,7 @@ controllo midiinchan midioutchan dr pbox paramv = do
                         atomically $ writeTChan midioutchan (paramv,floor $ y/k)
                         progressBarSetFraction level y
                         labelSetText label $ show (floor $ y/k)
+                        supp $ floor $ y/k
 
 {-
   coms <- hBoxNew False 1

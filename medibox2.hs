@@ -22,6 +22,7 @@ import Dynamic
 import GUI
 import MidiComm
 import Projections
+import Instr
 
 
 delay = 0.01
@@ -32,9 +33,16 @@ clientname = "medibox midi"
 
 weight = 127 
 main = do 
-        ssamples2Playable <- initSamples sampledir
-        tpresence <- newTVarIO $ Interface (IM.fromList $ zip [0..127] $ repeat (Base zero, Nothing)) (IM.fromList $ zip [0..127] $ repeat zero)
+        (msounds, scontrol2Playable,ssamples2Playable) <- initSynths sampledir
+        tpresence <- newTVarIO $ Interface 
+                        (IM.fromList $ zip [0..127] $ repeat (Base zero, Nothing)) 
                         (IM.fromList $ zip [0..127] $ repeat zero)
+                        (IM.fromList $  do 
+                                i <- [0 .. 15]
+                                j <- [0 .. 6]
+                                if j == 0 then [(i*7,Realize (i*7,i*7) 
+                                        (Right $ Synth i 16 0 (i*7 + 1) (i*7 + 2) (i*7 + 3) (i*7 + 4) (i*7 + 5) (i*7 + 6)))]
+                                        else [(i*7 + j, Realize (i*7 + j, i*7 + j) (Left $ SControl $ (i * 7 + j)))]) 
         -- communication patch bay
         (midiin, midiout, killmidi) <- midiInOut  clientname regchan 
         midiin2 <- atomically $ dupTChan midiin
@@ -69,7 +77,7 @@ main = do
                                         return $ project sc proj
             players = atomically $ do 
                         Interface seqs projs ssamples <-  readTVar tpresence
-                        return $ map ssamples2Playable $ IM.elems ssamples
+                        return $ map (what %~ either scontrol2Playable ssamples2Playable) $ IM.elems ssamples
                 
         t <- doesFileExist "current.medibox"
         when t $ do 
@@ -82,7 +90,7 @@ main = do
                 v  <- atomically $ readTVar tpresence
                 writeFile "current.medibox" $ show v
                 
-        gui guiIn guiOut tpresence tselection
+        gui msounds guiIn guiOut tpresence tselection
 
          
 
