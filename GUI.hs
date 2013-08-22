@@ -1,4 +1,4 @@
-{-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE ScopedTypeVariables, ViewPatterns #-}
 module GUI where
 
 import Graphics.UI.Gtk
@@ -8,6 +8,7 @@ import Control.Monad
 import qualified Data.IntMap as IM
 import Control.Concurrent
 import System.IO
+import Control.Arrow
 
 
 import Sound.OSC
@@ -16,54 +17,78 @@ import Control.Concurrent.STM
 import MidiComm
 import Graphics.UI.Gtk.Gdk.GC
 import Sequenza
+import Graphics.Rendering.Cairo
 import Haskell
 import Interface
 import PersistentChoiceLens     
-import Control.Lens  hiding (set)
+import Control.Lens  hiding (set, moveTo)
 import Projections
 import Instr
 import Realize
 
 k = 1/128
 
+myDraw _ = do
+    setSourceRGB 1 1 0
+    setLineWidth 4
 
-patternDraw dr mn tpresence tsel = do 
-        ds <- atomically $ do
+    moveTo 120 60
+    lineTo 60 110
+    lineTo 180 110
+    closePath
+    
+    stroke   
+visio ((+ 2) -> t) yt xs = do 
+        
+    setSourceRGB 0 0 0
+    setLineWidth 4
+    forM_ xs $ \((+ 2) -> x,(+ 2) -> y,h) -> do
+        moveTo x y
+        lineTo x (y + h)
+    setSourceRGB 1 0 0
+    setLineWidth 4
+    moveTo t 0
+    lineTo t yt
+    stroke
+patternDraw dr mn tpresence tsel ttimeperc  = do 
+        wdr <- widgetGetDrawWindow dr 
+        let ds mn =  atomically $ do 
+                
                 mpg <- readTVar tsel
-                let prog = mpg IM.! mn
+                t <- readTVar ttimeperc
+                let prog = mpg IM.! (mn `mod` 3)
                 Interface seqs projs ssamples <- readTVar tpresence
                 let     Realize (i,j) ssample = ssamples IM.! fromIntegral prog
                 case querySequenza seqs j  of
-                        Nothing -> return Nothing
+                        Nothing -> return  ([],t) 
                         Just (_,sc,nseqs) -> do             
                                 writeTVar tpresence $ Interface nseqs projs ssamples
-                                return $ Just $ project sc (projs IM.! i)
-        case ds of 
-                Just ds -> do 
-                          wdr <- widgetGetDrawWindow dr
-                          -- drawableGetSize :: DrawableClass d => d -> IO (Int, Int)
-                          (mx,my) <- drawableGetSize wdr
-                          let   ds' = (map (\(x,y) -> (floor $ x * fromIntegral mx, y)))  ds
-                                dmy = maximum $ map snd ds'
-                                ds''= map (\(x,y) -> (x,floor $ y * fromIntegral my )) ds'
-                          gc <- gcNewWithValues wdr newGCValues -- {foreground = Color 255 255 255, background = Color 0 0 0}
-                          -- drawLine :: DrawableClass d => d -> GC -> Point -> Point -> IO ()
-                          forM_ ds'' $ \(x,y) -> drawRectangle  wdr gc True x (my - y) 3 my
-                Nothing -> return ()
+                                return $ (project sc (projs IM.! i),t)
+        (mx,my) <- drawableGetSize wdr
+        renderWithDrawable wdr . forM_ [0..mn - 1] $ \z -> do 
+          (ds',t) <- liftIO $ first (map (\(x,y) -> (x * fromIntegral mx, y))) `fmap`  ds z
+          let   dmy = maximum $ map snd ds'
+                ds''= map (\(x,y) -> (x,fromIntegral z * fromIntegral my / fromIntegral mn, y * fromIntegral my / fromIntegral mn   )) ds'
+          visio (t * fromIntegral mx) (fromIntegral my) ds''
+        return True
+
+        
+        
 
 
-gui :: (Int ->  String) -> TChan (Int,Int) -> TChan (Int,Int) ->  TVar Interface -> TVar (IM.IntMap Int) -> IO ()
-gui snames midiinchan midioutchan tseq tselection = do
+gui :: (Int ->  String) -> TChan (Int,Int) -> TChan (Int,Int) ->  TVar Interface -> TVar (IM.IntMap Int) -> TVar Double -> IO ()
+gui snames midiinchan midioutchan tseq tselection ttimeperc = do
   thandle <- newTVarIO Nothing
 
 
   initGUI
   window <- windowNew
 
-  mbox <- hBoxNew True 1 
+  mbox <- vBoxNew True 1 
   set window [windowDefaultWidth := 200, windowDefaultHeight := 200,
                           containerBorderWidth := 10, containerChild := mbox]
-  forM_ [0..2] $ \mn -> do
+        {-
+  drs <- forM [0..10] $ \mn -> do
           let sh x = mn * 41 + x
 
           vbox    <- vBoxNew False 1
@@ -88,10 +113,6 @@ gui snames midiinchan midioutchan tseq tselection = do
           frame <- frameNew 
           set frame [containerChild:= bbox]
           boxPackEnd vbox frame PackGrow 0
-          dr <- drawingAreaNew
-          dr `on`  exposeEvent $  do liftIO $ patternDraw dr mn tseq tselection >> return True
-          forkIO . forever $ do sleepThread 0.1 >> postGUIAsync (widgetQueueDraw dr)
-          boxPackEnd bbox dr PackGrow 0
 
           forM_ [0..2] $ \paramt -> do
              pbox <- hBoxNew False 1
@@ -106,7 +127,15 @@ gui snames midiinchan midioutchan tseq tselection = do
           set frame [containerChild:= pbox]
           boxPackStart vbox frame PackGrow 0
           forM_ [0..4] $ \paramv -> controllo midiinchan midioutchan (Just dr) pbox (const $ return ()) $  sh $ paramv + 24
+          return (mn)
+-}
 
+  dr <- drawingAreaNew
+  dr `on`  exposeEvent $  do liftIO $ patternDraw dr 10 tseq tselection ttimeperc >> return True 
+  boxPackEnd mbox dr PackGrow 0
+  timeoutAddFull (widgetQueueDraw dr >> return True) priorityHigh 20
+
+        
 
   onDestroy window mainQuit
   widgetShowAll window

@@ -24,7 +24,7 @@ import MidiComm
 import Projections
 import Instr
 
-
+lineupdate = 100
 delay = 0.01
 sampledir = "."
     
@@ -83,14 +83,18 @@ main = do
         when t $ do 
                 v <- readFile  "current.medibox"
                 atomically $ writeTVar tpresence $ read v
-        
-        forkIO $ outputCycle  (t0 + 1) serveProj (return $ Globals 0.1 4 100) players 
+        ttimeperc <- newTVarIO 0
+        forkIO $ forever $ do
+                sleepThread 0.05 
+                t0 <- time
+                atomically $ writeTVar ttimeperc (floatMod (t0/4) 1)
+       --  forkIO $ outputCycle  (t0 + 1) serveProj (return $ Globals 0.1 4 100) players (atomically . writeTVar ttimeperc) 
         forkIO . forever $ do 
                 sleepThread 5
                 v  <- atomically $ readTVar tpresence
                 writeFile "current.medibox" $ show v
                 
-        gui msounds guiIn guiOut tpresence tselection
+        gui msounds guiIn guiOut tpresence tselection ttimeperc
 
          
 

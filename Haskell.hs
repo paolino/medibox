@@ -17,9 +17,9 @@ floatMod x y = let
 
 every = flip map
 
-class Present a where
-        zero :: a
 
+
+from128 x = 1/128 * fromIntegral x
 
 hystogram :: (Num d, RealFrac b) => b -> [(b, d)] -> [(b, d)]
 hystogram m = map (fst . head &&& sum . map snd) . groupBy (collapse m `on` fst) . map (first $ quantize m) where

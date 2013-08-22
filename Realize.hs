@@ -48,16 +48,17 @@ output (t1,t2) ft pres es = do
                                 c <- ctx
                                 play c $ (ft t, x)
 
-outputCycle :: Tempo -> QueryScore IO -> IO Globals -> IO [Realize Playable] -> IO ()
-outputCycle t0 ioscore g f = do 
+outputCycle :: Tempo -> QueryScore IO -> IO Globals -> IO [Realize Playable] -> (Double -> IO ()) -> IO ()
+outputCycle t0 ioscore g f tper = do 
         Globals del per sub <- g
         let     dl = 1 / fromIntegral sub
                 ts = [0, dl ..]
         forM_ [0..sub - 1] $ \n -> do
                 sleepThreadUntil (t0 + per * fromIntegral n * dl)
+                tper (fromIntegral n * dl)
                 pls <- f
                 output ((!! n) . ap zip tail $ ts)  (\t -> t0 + del + per * t) ioscore pls
-        outputCycle (t0 + per) ioscore g f
+        outputCycle (t0 + per) ioscore g f tper
 
 
 

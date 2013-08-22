@@ -1,21 +1,12 @@
-{-# LANGUAGE TemplateHaskell, NoMonomorphismRestriction, ViewPatterns, FlexibleInstances, Rank2Types #-}       
+{-# LANGUAGE TemplateHaskell #-}       
 
-module Projections where
+module Projections (Projection, ampl, offset, shift, quant, cutin, project) where
 
-import Data.List (groupBy, partition, sort)
-import Data.Ord
-import Data.Function (on)
-import qualified Data.IntMap as M
-import Data.IntMap (IntMap)
 
-import Control.Arrow ((&&&),first,second, (***))
---------------------------------
+import Control.Arrow (second, (***))
 import Control.Lens 
-import Control.Lens.Tuple
+import Data.Binary
 
-import Language.Haskell.TH.Lens
-
--------------------------------
 import Haskell
 import Sequenza
 
@@ -26,12 +17,14 @@ data Projection = Projection
         , _shift :: Int
         , _quant :: Int
         , _cutin :: Int
-        } deriving (Read,Show)
+        } 
 
 $(makeLenses ''Projection)
 
-projection_lenses :: Functor f => [(Int -> f Int) -> Projection -> f Projection]
-projection_lenses = [ ampl, offset, shift, quant, cutin]
+
+instance Binary Projection where
+  put (Projection a b c d e) = put a >> put b >> put c >> put d >> put e
+  get = get >>= \a -> get >>= \b -> get >>= \c -> get >>= \d -> get >>= \e -> return (Projection a b c d e)
 
 project :: Score Int -> Projection -> Score Double
 project sc (Projection da o sh qm ci') = let 
@@ -44,7 +37,5 @@ project sc (Projection da o sh qm ci') = let
                         in tsc . every ts $ sht *** ((from128 o +).(from128 da *). (/fromIntegral m) . fromIntegral)
 
 
-instance Present Projection where
-        zero = Projection 64 0 0 32 0
 
 

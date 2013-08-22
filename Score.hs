@@ -1,6 +1,6 @@
 {-# LANGUAGE TemplateHaskell#-}  
 
-module Score (Pattern (..), Sequenza,  pnumber, pwidth, pshift, Score, score, Projection (..), ampl, offset, shift, quant, cutin, project) where
+module Score (Tempo, Pattern (..), Sequenza,  pnumber, pwidth, pshift, Score, score, Projection (..), ampl, offset, shift, quant, cutin, project) where
 
 import Data.List (sort) 
 import qualified Data.IntMap as IM (elems)
