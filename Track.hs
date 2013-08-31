@@ -1,4 +1,7 @@
 {-# LANGUAGE TemplateHaskell, Rank2Types #-}
+-- | This module export the DBTrack, an optimized structure holding a collection of 'Sequenza' a collection of 'Projection' and a collection of 'Track', all Int indexed and computation cached. 
+-- The module exports some lenses which takes care of using the cached computations on query and update the computations definition on insertion/deletion.
+-- The constructor of DBTrack is not exported, but a Binary instance is available for persistence.
 module Track (Track (..) , tseq, tproj, DBTrack, DBLens, newDBTrack, scoreOfTrack, dbseq, dbproj, dbtrack) where
 
 
@@ -9,7 +12,7 @@ import Control.Arrow ((&&&))
 
 import Control.Lens
 import Data.Binary
-import Score (Sequenza, Tempo, score, Score, Projection, project)
+import Score (Sequenza, Tempo, tempi, Score, Projection, project)
 
 data Track = Track
         {       _tseq :: Int
@@ -25,7 +28,7 @@ instance Binary Track where
 data DBTrack = DBTrack 
         {       _dbseq' :: IntMap (Sequenza, [Tempo])
         ,       _dbproj' :: IntMap Projection
-        ,       _dbtrack' :: IntMap (Track,Maybe (Score Double))
+        ,       _dbtrack' :: IntMap (Track,Maybe Score)
         }
 
 $(makeLenses ''DBTrack)
@@ -37,19 +40,19 @@ instance Binary DBTrack where
 newDBTrack :: DBTrack
 newDBTrack = DBTrack IM.empty IM.empty IM.empty
 
-evalTrack :: DBTrack -> Track -> Maybe (Score Double)
+evalTrack :: DBTrack -> Track -> Maybe Score
 evalTrack db (Track i j)  = do
         p <- db  ^. dbproj' . at j 
         s <- db ^. dbseq' . at i
         return $ project (snd s) p
    
 
-scoreOfTrack :: DBTrack -> Int -> Maybe (Score Double)
+scoreOfTrack :: DBTrack -> Int -> Maybe Score
 scoreOfTrack db n = join . fmap snd $ db ^. dbtrack' . at n
 
 insertSequenza :: Int -> DBTrack -> Maybe Sequenza -> DBTrack
 insertSequenza k d s = let
-        d' = dbseq' . at k .~ fmap (id &&& score) s $ d
+        d' = dbseq' . at k .~ fmap (id &&& tempi) s $ d
         touch (t, sc) 
                 | t ^. tseq == k = (t, evalTrack d' t)
                 | otherwise = (t, sc)
