@@ -27,6 +27,15 @@ data Poin =
         Tr Int Int
         | Sq (String, Double, Double)
         | Pj (String, Double, Double)
+
+trackwindow = 16
+heightwindow = 800
+
+
+trackdensity = fromIntegral trackwindow / fromIntegral heightwindow 
+trackheight = 1/trackdensity
+selectedtrack y = floor $ fromIntegral trackwindow - (y *trackdensity)
+
 main :: IO ()
 main = do
   initGUI
@@ -50,7 +59,7 @@ main = do
                                  GLModeDepth,
                                  GLModeDouble]
   
-  ref <- newTVarIO (0, [0..11],db,Tr 0 0)
+  ref <- newTVarIO (0, 0 ,dbflat,Tr 0 0)
   -- Create an OpenGL drawing area widget
 
 
@@ -58,7 +67,6 @@ main = do
           canvas <- glDrawingAreaNew glconfig
 
           widgetSetSizeRequest canvas dx dy
-
           -- Initialise some GL setting just before the canvas first gets shown
           -- (We can't initialise these things earlier since the GL resources that
           -- we are using wouldn't heve been setup yet)
@@ -79,9 +87,9 @@ main = do
               glDrawableSwapBuffers glwindow
             return True
           return canvas
-  tracks <- canva (320,900,drawCube )
-  projs <- canva (120,900,drawProj)
-  seqs <- canva (480,900,drawSeqs)
+  tracks <- canva (320,heightwindow,drawCube )
+  projs <- canva (120,heightwindow,drawProj)
+  seqs <- canva (heightwindow,heightwindow,drawSeqs)
   -- Setup the animation
   t0 <- time
   forkIO. forM_ [0..] $ \n -> do
@@ -123,71 +131,72 @@ main = do
   let prdesc = (["AMPLIFICATION","OFFSET","WIDTH","SHIFT","QUANTIFICATION","CUTIN"] !!)
   on projs motionNotifyEvent $ do
         (x,y) <- eventCoordinates
-        let (p,n,_) =  (floor $ x / 20,floor $ 12 - (y *12 / 900),floor $ 900/12 - (floatMod y $ 900/12))
+        let (p,n) =  (floor $ x / 20,selectedtrack y)
         liftIO $ do 
-                atomically $ modifyTVar ref $ _4 .~ Pj (prdesc p,1/121,(fromIntegral n + 0.8)/ 12) 
+                atomically $ modifyTVar ref $ _4 .~ Pj (prdesc p,1/121,(fromIntegral (n) + 0.8)/ fromIntegral trackwindow) 
                 return True
         
   on projs scrollEvent $  tryEvent $ do 
         ScrollUp <- eventScrollDirection
         (x,y) <- eventCoordinates
-        let (p,n,_) =  (floor $ x / 20,floor $ 12 - (y *12 / 900),floor $ 900/12 - (floatMod y $ 900/12))
+        let (p,n) =  (floor $ x / 20,selectedtrack y)
         liftIO $ do 
                 (t,ms,db,s) <- atomically $ readTVar ref
-                let  Just (Track i j) = db ^. dbtrack n
+                let  Just (Track i j) = db ^. dbtrack (n + ms)
                 atomically $ modifyTVar ref $ _3 . dbproj j . traverse . (prlens p) %~ (min 127 .(+1))
         
   on projs scrollEvent $  tryEvent $ do 
         ScrollDown <- eventScrollDirection
         (x,y) <- eventCoordinates
-        let (p,n,_) =  (floor $ x / 20,floor $ 12 - (y *12 / 900),floor $ 900/12 - (floatMod y $ 900/12))
+        let (p,n) =  (floor $ x / 20,selectedtrack y)
         
         liftIO $ do 
                 (t,ms,db,s) <- atomically $ readTVar ref
-                let  Just (Track i j) = db ^. dbtrack n
+                let  Just (Track i j) = db ^. dbtrack ( n + ms)
                 atomically $ modifyTVar ref $ _3 . dbproj j . traverse . (prlens p) %~ (max 0.(subtract 1))
   
   let sqlens = ([Score.pnumber, Score.pwidth, Score.pshift] !!)
   let sqdesc = (["NUMBER","WIDTH","OFFSET"] !!)
   on seqs motionNotifyEvent $ do
         (x,y) <- eventCoordinates
-        let (q,p,n,_) =  (floor $ floatMod (x/20) 3, floor $ x / 20 / 3,floor $ 12 - (y *12 / 900),floor $ 900/12 - (floatMod y $ 900/12))
+        let (q,p,n) =  (floor $ floatMod (x/20) 3, floor $ x / 20 / 3,selectedtrack y)
         liftIO $ do 
-                atomically $ modifyTVar ref $ _4 .~ Sq (sqdesc q,fromIntegral (p*3)/24 + 1/480 ,(fromIntegral n + 0.8)/ 12) 
+                atomically $ modifyTVar ref $ _4 .~ Sq (sqdesc q,fromIntegral (p*3)/24 + 1/fromIntegral heightwindow ,(fromIntegral (n) + 0.8)/ fromIntegral trackwindow) 
                 return True
 
   on seqs scrollEvent $  tryEvent $ do 
         ScrollUp <- eventScrollDirection
         (x,y) <- eventCoordinates
-        let (q,p,n,_) =  (floor $ floatMod (x/20) 3, floor $ x / 20 / 3,floor $ 12 - (y *12 / 900),floor $ 900/12 - (floatMod y $ 900/12))
+        let (q,p,n) =  (floor $ floatMod (x/20) 3, floor $ x / 20 / 3,selectedtrack y)
         liftIO $ do 
                 (t,ms,db,s) <- atomically $ readTVar ref
-                let  Just (Track i j) = db ^. dbtrack n
+                let  Just (Track i j) = db ^. dbtrack (n + ms)
                 atomically $ modifyTVar ref $ _3 . dbseq i . traverse . at p . traverse . (sqlens q) %~ (min 127 .(+1))
   on seqs scrollEvent $  tryEvent $ do 
         ScrollDown <- eventScrollDirection
         (x,y) <- eventCoordinates
-        let (q,p,n,_) =  (floor $ floatMod (x/20) 3, floor $ x / 20 / 3,floor $ 12 - (y *12 / 900),floor $ 900/12 - (floatMod y $ 900/12))
+        let (q,p,n) =  (floor $ floatMod (x/20) 3, floor $ x / 20 / 3,selectedtrack y)
         liftIO $ do 
                 (t,ms,db,s) <- atomically $ readTVar ref
-                let  Just (Track i j) = db ^. dbtrack n
+                let  Just (Track i j) = db ^. dbtrack (n + ms)
                 atomically $ modifyTVar ref $ _3 . dbseq i . traverse . at p . traverse . (sqlens q) %~ (max 0 .(subtract 1))
-
-  on tracks  motionNotifyEvent $ do
-        (x,y) <- eventCoordinates
-        let (q,p,n,_) =  (0,0,floor $ 12 - (y *12 / 900),0)
-        liftIO $ do 
-                (t,ms,db,s) <- atomically $ readTVar ref
-                let  Just (Track i j) = db ^. dbtrack n
-                atomically $ modifyTVar ref $ _4 .~ Tr i j
-                return True
+  on tracks scrollEvent $ tryEvent $ do
+        ScrollUp <- eventScrollDirection
+        liftIO $ atomically $ modifyTVar ref $ _2  %~ (min (128 - 1 - trackwindow). (+1))
+  on tracks scrollEvent $ tryEvent $ do
+        ScrollDown <- eventScrollDirection
+        liftIO $ atomically $ modifyTVar ref $ _2  %~ (max 0 . subtract 1)
       
-  sc <- scrolledWindowNew Nothing Nothing
+  -- sc <- scrolledWindowNew Nothing Nothing
   
   frame <- frameNew
   set frame [containerChild := hb]
-  scrolledWindowAddWithViewport sc frame
-  set window [containerChild := sc] 
+  gbox <- vBoxNew False 1
+  -- scrolledWindowAddWithViewport sc frame
+  l <- labelNew $ Just "Medibox (0.1)"
+  boxPackStart gbox l PackGrow  0
+  boxPackStart gbox frame PackNatural 0
+  set window [containerChild := gbox] 
   widgetShowAll window
   mainGUI
 
@@ -203,12 +212,12 @@ drawCube  _ state = do
   let sr x c1 c2 c3 c4 = let 
         r c = c -- 4 * (x - 0.5) ^ 2 + c
         in Color4 (r c1) (r c2) (r c3) c4
-  let ns = realToFrac . fromIntegral $ length ms
-  forM_ ms $ \n -> do 
+  let ns = realToFrac . fromIntegral $ trackwindow
+  forM_ [ms .. ms + trackwindow -1] $ \n -> do 
         let  sc = maybe [] id $ scoreOfTrack db n
              lh h = 1/ns * realToFrac (0.9 * (min 1 h))
-             y = 1/ns * fromIntegral n
-             Just (Track i j) = db ^. dbtrack n
+             y = 1/ns * fromIntegral (n - ms)
+             Just (Track i j) = db ^. dbtrack (n)
              Just (Score.Projection a o w s q c) = db ^. dbproj j
         forM_ sc $ \(realToFrac -> x,lh -> h) -> renderPrimitive Quads $ do
                 color (sr x 0.6 0.7 0.4 1 :: Color4 GLfloat)
@@ -247,7 +256,7 @@ drawProj glwindow state = do
   (t,ms,db,s) <- atomically $ readTVar state
   matrixMode $= Modelview 0
   loadIdentity
-  let ns = realToFrac . fromIntegral $ length ms
+  let ns = realToFrac . fromIntegral $ trackwindow
 
   color (Color4 0.4 0.4 0.4 0.2 :: Color4 GLfloat)
   mj <- case s of
@@ -257,8 +266,8 @@ drawProj glwindow state = do
   let mark j' = case mj of 
         Nothing -> id
         Just j -> if j == j' then subtract 0.1 else id 
-  forM_ [0 .. ns -1] $ \nt -> do
-                case db ^. dbproj (floor nt) of 
+  forM_ (zip [ms ..] [0 .. ns -1]) $ \(it, nt) -> do
+                case db ^. dbproj it of 
                         Nothing -> return ()
                         Just (Score.Projection a b c d e f) -> do 
                                 let     y = nt/ns
@@ -296,9 +305,9 @@ drawSeqs _ state = do
   case s of
         Sq s ->   renderWordPOSWH 0.5 0.5 (s ^. _2) (s ^. _3) (1/15/8) (1/70) (s ^. _1)
         _ -> return ()
-  let ns = realToFrac . fromIntegral $ length ms
-  forM_ [0 .. ns -1] $ \nt -> do
-                case db ^. dbseq (floor nt) of
+  let ns = realToFrac . fromIntegral $ trackwindow
+  forM_ (zip [ms ..] [0 .. ns -1]) $ \(it,nt) -> do
+                case db ^. dbseq it of
                         Nothing -> return ()
                         Just s  -> do 
                                 let y = nt/ns
