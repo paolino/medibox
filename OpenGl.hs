@@ -89,7 +89,7 @@ main = do
           return canvas
   tracks <- canva (320,heightwindow,drawCube )
   projs <- canva (120,heightwindow,drawProj)
-  seqs <- canva (heightwindow,heightwindow,drawSeqs)
+  seqs <- canva (480,heightwindow,drawSeqs)
   -- Setup the animation
   t0 <- time
   forkIO. forM_ [0..] $ \n -> do
@@ -115,15 +115,9 @@ main = do
   set window [ containerBorderWidth := 8,
                    windowTitle := "tracks widget" ]
   hb <- hBoxNew False 1
-  frame <- frameNew
-  set frame [containerChild := tracks]
-  boxPackStart hb frame PackNatural 0 
-  frame <- frameNew
-  set frame [containerChild := projs]
-  boxPackStart hb frame PackNatural 0 
-  frame <- frameNew
-  set frame [containerChild := seqs]
-  boxPackStart hb frame PackNatural 0 
+  boxPackStart hb tracks PackNatural 0 
+  boxPackStart hb projs PackNatural 0 
+  boxPackStart hb seqs PackNatural 0 
   widgetAddEvents projs [PointerMotionMask]
   widgetAddEvents seqs [PointerMotionMask]
   widgetAddEvents tracks [PointerMotionMask]
@@ -154,16 +148,34 @@ main = do
                 (t,ms,db,s) <- atomically $ readTVar ref
                 let  Just (Track i j) = db ^. dbtrack ( n + ms)
                 atomically $ modifyTVar ref $ _3 . dbproj j . traverse . (prlens p) %~ (max 0.(subtract 1))
-  
+  excoo <- newTVarIO (0,0)
   let sqlens = ([Score.pnumber, Score.pwidth, Score.pshift] !!)
   let sqdesc = (["NUMBER","WIDTH","OFFSET"] !!)
   on seqs motionNotifyEvent $ do
+        rcoo <- eventRootCoordinates 
+        bb <- (Button1 `elem`) `fmap` eventModifier
         (x,y) <- eventCoordinates
         let (q,p,n) =  (floor $ floatMod (x/20) 3, floor $ x / 20 / 3,selectedtrack y)
         liftIO $ do 
-                atomically $ modifyTVar ref $ _4 .~ Sq (sqdesc q,fromIntegral (p*3)/24 + 1/fromIntegral heightwindow ,(fromIntegral (n) + 0.8)/ fromIntegral trackwindow) 
+                when (not bb) $ atomically $ writeTVar excoo rcoo
+                atomically $ modifyTVar ref $ _4 .~ Sq (sqdesc q,fromIntegral (p*3)/24 + 1/fromIntegral 480 ,(fromIntegral (n) + 0.8)/ fromIntegral trackwindow) 
                 return True
-
+  on seqs motionNotifyEvent $ tryEvent $ do
+        [Button1] <- eventModifier
+        (x,y) <- eventRootCoordinates
+        let (q,p,n) =  (floor $ floatMod (x/20) 3, floor $ x / 20 / 3,selectedtrack y)
+        liftIO $ do
+                (x',y') <- atomically $ readTVar excoo
+                (t,ms,db,s) <- atomically $ readTVar ref
+                let  Just (Track i j) = db ^. dbtrack (n + ms)
+                if y' > y then  
+                        atomically $ modifyTVar ref $ _3 . dbseq i . traverse . at p . traverse . (sqlens q) %~ (max 0 .(subtract 1))
+                        else if y' < y then 
+                                atomically $ modifyTVar ref $ _3 . dbseq i . traverse . at p . traverse . (sqlens q) %~ (min 127 .(+1))
+                                else return ()
+                Just s <- screenGetDefault 
+                Just d <- displayGetDefault
+                displayWarpPointer d s (floor x') (floor y')
   on seqs scrollEvent $  tryEvent $ do 
         ScrollUp <- eventScrollDirection
         (x,y) <- eventCoordinates
@@ -198,6 +210,8 @@ main = do
   boxPackStart gbox frame PackNatural 0
   set window [containerChild := gbox] 
   widgetShowAll window
+  dat <- widgetGetDrawWindow $ window
+  cursorNew Tcross >>= drawWindowSetCursor dat . Just 
   mainGUI
 
 zz1 = 1/256
@@ -214,6 +228,8 @@ drawCube  _ state = do
         in Color4 (r c1) (r c2) (r c3) c4
   let ns = realToFrac . fromIntegral $ trackwindow
   forM_ [ms .. ms + trackwindow -1] $ \n -> do 
+        color (Color4 0.4 0.4 0.4 0.2 :: Color4 GLfloat)
+        renderNumberPosWH 0.5 0.5 0.95 (fromIntegral (n - ms) / realToFrac ns + 0.04) (1/50) (1/90) n 
         let  sc = maybe [] id $ scoreOfTrack db n
              lh h = 1/ns * realToFrac (0.9 * (min 1 h))
              y = 1/ns * fromIntegral (n - ms)
@@ -259,43 +275,21 @@ drawProj glwindow state = do
   let ns = realToFrac . fromIntegral $ trackwindow
 
   color (Color4 0.4 0.4 0.4 0.2 :: Color4 GLfloat)
-  mj <- case s of
-        Pj s ->  renderWordPOSWH 0.5 0.5 (s ^. _2) (s ^. _3) (1/30) (1/70) (s ^. _1) >> return Nothing
-        Tr i j -> return $ Just j
-        _ -> return Nothing 
-  let mark j' = case mj of 
-        Nothing -> id
-        Just j -> if j == j' then subtract 0.1 else id 
+  case s of
+        Pj s ->  renderWordPOSWH 0.5 0.5 (s ^. _2) (s ^. _3) (1/30) (1/90) (s ^. _1) 
+        _ -> return () 
   forM_ (zip [ms ..] [0 .. ns -1]) $ \(it, nt) -> do
                 case db ^. dbproj it of 
                         Nothing -> return ()
                         Just (Score.Projection a b c d e f) -> do 
                                 let     y = nt/ns
-                                        fy = mark $ floor nt
-                                renderPrimitive LineLoop $ do 
-                                                color (Color4 0.6 0.6 0.6 0.3 :: Color4 GLfloat)
-                                                vertex (Vertex2 (0) (y) :: Vertex2 GLfloat)
-                                                vertex (Vertex2  1 (y):: Vertex2 GLfloat)
-                                                color (Color4 0.4 0.6 0.6 0.3 :: Color4 GLfloat)
-                                                vertex (Vertex2 1 (y+1/ns) :: Vertex2 GLfloat)
-                                                vertex (Vertex2 (0) (y+1/ns) :: Vertex2 GLfloat)
-                                forM_ (zip (ap zip tail [0,1/6..]) [a,b,c,d,e,f]) $ \((x1,x2), a) -> do
-                                        color (Color4 0.4 0.4 0.4 1 :: Color4 GLfloat)
-                                        renderNumberPosWH 0.5 0.5 (realToFrac x2 - 1/15) (realToFrac y + 1/200) (1/25) (1/80) a
-                                        renderPrimitive LineLoop $ do 
-                                                color (Color4 0.8 0.8 0.8 0.3 :: Color4 GLfloat)
-                                                vertex (Vertex2 x1 (y) :: Vertex2 GLfloat)
-                                                vertex (Vertex2  x2 (y):: Vertex2 GLfloat)
-                                                color (Color4 0.9 0.9 0.9 0.3 :: Color4 GLfloat)
-                                                vertex (Vertex2 x2 (y+1/ns) :: Vertex2 GLfloat)
-                                                vertex (Vertex2 x1 (y+1/ns) :: Vertex2 GLfloat)
-                                        renderPrimitive Quads $ do 
-                                                color (Color4 (fy 0.9) (fy 0.9) (fy 1) 0.3 :: Color4 GLfloat)
-                                                vertex (Vertex2 x1 (y) :: Vertex2 GLfloat)
-                                                vertex (Vertex2  x2 (y):: Vertex2 GLfloat)
-                                                color (Color4 (fy 0.6) (fy 0.6) (fy 1) 0.3 :: Color4 GLfloat)
-                                                vertex (Vertex2 x2 (y+Score.from128 a/ns) :: Vertex2 GLfloat)
-                                                vertex (Vertex2 x1 (y+Score.from128 a/ns) :: Vertex2 GLfloat)
+                                forM_ (zip [0,1/6..] [a,b,c,d,e,f]) $ \(x1, a) -> do
+                                        preservingMatrix $ do 
+                                                        GL.translate (Vector3 x1 y (0:: GLfloat)) 
+                                                        GL.scale (1/6) (1/ns) 1
+                                                        bar a (Color4 0.3 0.9    0.5 1 :: Color4 GLfloat)
+                                                                (Color4 0.7 0.7 (x1/3 + 0.6) 0.1 :: Color4 GLfloat)
+
 
 drawSeqs _ state = do
   (t,ms,db,s) <- atomically $ readTVar state
@@ -303,7 +297,7 @@ drawSeqs _ state = do
   loadIdentity
   color (Color4 0.4 0.4 0.4 0.2 :: Color4 GLfloat)
   case s of
-        Sq s ->   renderWordPOSWH 0.5 0.5 (s ^. _2) (s ^. _3) (1/15/8) (1/70) (s ^. _1)
+        Sq s ->   renderWordPOSWH 0.5 0.5 (s ^. _2) (s ^. _3) (1/15/8) (1/90) (s ^. _1)
         _ -> return ()
   let ns = realToFrac . fromIntegral $ trackwindow
   forM_ (zip [ms ..] [0 .. ns -1]) $ \(it,nt) -> do
@@ -313,49 +307,44 @@ drawSeqs _ state = do
                                 let y = nt/ns
                                 forM_ [0..7] $ \p -> do
                                         let x' = p * 1/8
-                                        renderPrimitive LineLoop $ do 
-                                                color (Color4 0.6 0.6 0.6 0.3 :: Color4 GLfloat)
-                                                vertex (Vertex2 (x') (y) :: Vertex2 GLfloat)
-                                                vertex (Vertex2  (x' + 1/8) (y):: Vertex2 GLfloat)
-                                                color (Color4 0.4 0.6 0.6 0.3 :: Color4 GLfloat)
-                                                vertex (Vertex2 (x' + 1/8) (y+1/ns) :: Vertex2 GLfloat)
-                                                vertex (Vertex2 (x') (y+1/ns) :: Vertex2 GLfloat)
                                         case s ^. at (floor p) of
                                                 Just (Score.Pattern np wp sp)  -> do 
-                                                        forM_ (zip (ap zip tail [0,1/24..]) [(0.3,np),(0.5,wp),(0.7,sp)]) $ \((x1,x2), (c,a)) -> do
-                                                                color (Color4 0.4 0.4 0.4 1 :: Color4 GLfloat)
-                                                                renderNumberPosWH 0.5 0.5 (realToFrac x'+ realToFrac x2 - 1/15/4) (realToFrac y + 1/200) (1/100) (1/80) a
-                                                                renderPrimitive LineLoop $ do 
-                                                                        color (Color4 c 0.8 0.8 0.3 :: Color4 GLfloat)
-                                                                        vertex (Vertex2 (x' + x1) (y) :: Vertex2 GLfloat)
-                                                                        vertex (Vertex2  (x' + x2) (y):: Vertex2 GLfloat)
-                                                                        color (Color4 c 0.9 0.9 0.3 :: Color4 GLfloat)
-                                                                        vertex (Vertex2 (x' + x2) (y+1/ns) :: Vertex2 GLfloat)
-                                                                        vertex (Vertex2 (x' + x1) (y+1/ns) :: Vertex2 GLfloat)
-                                                                renderPrimitive Quads $ do 
-                                                                        color (Color4 (c + 0.2) 1 0.9 1 :: Color4 GLfloat)
-                                                                        vertex (Vertex2 (x' + x1) (y) :: Vertex2 GLfloat)
-                                                                        vertex (Vertex2  (x' + x2) (y):: Vertex2 GLfloat)
-                                                                        color (Color4 c 1 0.6 1 :: Color4 GLfloat)
-                                                                        vertex (Vertex2 (x' + x2) (y+Score.from128 a/ns) :: Vertex2 GLfloat)
-                                                                        vertex (Vertex2 (x' + x1) (y+Score.from128 a/ns) :: Vertex2 GLfloat)
-                                                                renderPrimitive Quads $ do 
-                                                                        color (Color4 (c + 0.2) 0.8 0.9 0.1 :: Color4 GLfloat)
-                                                                        vertex (Vertex2 (x' + x1) (y + 1/ns) :: Vertex2 GLfloat)
-                                                                        vertex (Vertex2  (x' + x2) (y + 1/ns):: Vertex2 GLfloat)
-                                                                        color (Color4 c 0.9 1 0.1 :: Color4 GLfloat)
-                                                                        vertex (Vertex2 (x' + x2) (y+Score.from128 a/ns) :: Vertex2 GLfloat)
-                                                                        vertex (Vertex2 (x' + x1) (y+Score.from128 a/ns) :: Vertex2 GLfloat)
+                                                        forM_ (zip [0,1/24..] [(0.1,np),(0.4,wp),(0.7,sp)]) $ \(x1, (c,a)) -> do
+                                                                preservingMatrix $ do 
+                                                                        GL.translate (Vector3 (x' + x1) y (0:: GLfloat)) 
+                                                                        GL.scale (1/24) (1/ns) 1
+                                                                        bar a (Color4 1 0.6 0.6 1 :: Color4 GLfloat)
+                                                                                (Color4 (c + 0.3) 0.7 0.7 0.1 :: Color4 GLfloat)
+                                                             
 
+                                                Nothing ->  return () 
 
-                                                Nothing ->  do 
-                                                        let x' = p * 1/8
-                                                        forM_ (ap zip tail (take 4 [0,1/24..])) $ \((x1,x2)) -> do
-                                                                renderPrimitive LineLoop $ do 
-                                                                        color (Color4 0.8 0.8 0.8 0.3 :: Color4 GLfloat)
-                                                                        vertex (Vertex2 (x' + x1) (y) :: Vertex2 GLfloat)
-                                                                        vertex (Vertex2  (x' + x2) (y):: Vertex2 GLfloat)
-                                                                        color (Color4 0.9 0.9 0.9 0.3 :: Color4 GLfloat)
-                                                                        vertex (Vertex2 (x' + x2) (y+1/ns) :: Vertex2 GLfloat)
-                                                                        vertex (Vertex2 (x' + x1) (y+1/ns) :: Vertex2 GLfloat)
+bar a c0 c1 = do 
+        let y = Score.from128 a
+        -- perimeter
+        color (Color4 0.6 0.6 0.6 1 :: Color4 GLfloat)
+        renderNumberPosWH 0.5 0.5 (3/5) (1/8) (1/5) (1/5) a
+        renderPrimitive LineLoop $ do 
+                color (Color4 0.8 0.8 0.8 0.3 :: Color4 GLfloat)
+                vertex (Vertex2 0 0 :: Vertex2 GLfloat)
+                vertex (Vertex2 1 0 :: Vertex2 GLfloat)
+                color (Color4 0.9 0.9 0.9 0.3 :: Color4 GLfloat)
+                vertex (Vertex2 1 1 :: Vertex2 GLfloat)
+                vertex (Vertex2 0 1 :: Vertex2 GLfloat)
+        -- bar
+        renderPrimitive Quads $ do 
+                color (Color4 1 1 1 1 :: Color4 GLfloat)
+                vertex (Vertex2 0.1 0 :: Vertex2 GLfloat)
+                vertex (Vertex2  0.9 0 :: Vertex2 GLfloat)
+                color (c0 :: Color4 GLfloat)
+                vertex (Vertex2 0.8 y :: Vertex2 GLfloat)
+                vertex (Vertex2 0.2 y :: Vertex2 GLfloat)
+        -- rest
+        renderPrimitive Quads $ do 
+                color (Color4 1 1 1 0.1 :: Color4 GLfloat)
+                vertex (Vertex2 0 0 :: Vertex2 GLfloat)
+                vertex (Vertex2 1 0 :: Vertex2 GLfloat)
+                color (c1 :: Color4 GLfloat)
+                vertex (Vertex2 1 1 :: Vertex2 GLfloat)
+                vertex (Vertex2 0 1 :: Vertex2 GLfloat)
 
