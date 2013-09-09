@@ -1,12 +1,13 @@
 
-{-# LANGUAGE TemplateHaskell, NoMonomorphismRestriction, ScopedTypeVariables, GeneralizedNewtypeDeriving #-}       
+{-# LANGUAGE TemplateHaskell, NoMonomorphismRestriction, ScopedTypeVariables, GeneralizedNewtypeDeriving, FlexibleInstances #-}       
 
 module Haskell  where
 
 import Data.Monoid
 import Control.Lens
 import Data.List
-import qualified Data.IntMap 
+import qualified Data.IntMap as IM
+
 import Control.Arrow
 import Control.Monad.State
 import Data.Function (on)
@@ -19,6 +20,13 @@ every = flip map
 
 
 
+
+firstFree :: IM.IntMap a -> Int
+firstFree g 
+	| IM.size g == 0 = 0
+	| otherwise = let
+		ks = dropWhile (\(x,y) -> x == y) $ zip [0 .. ] $ IM.keys g
+		in if null ks then IM.size g else fst . head $ ks
 
 hystogram :: RealFrac b => b -> [b] -> [(b, Int)]
 hystogram m = map (head &&& length) . groupBy (collapse m) . map (quantize m) . sort where
@@ -34,3 +42,13 @@ mapAccumM f s xs = let
         swap (x,y) = (y,x) 
         f' x s = swap `fmap` f s x
         in swap `fmap`  runStateT (mapM (StateT . f') xs) s 
+
+newtype SFst a = SFst {sfst :: a }
+
+instance Eq  a => Eq (SFst (a,b)) where
+	(==) = (==) `on` (fst . sfst)
+
+instance Ord a => Ord (SFst (a,b)) where
+	compare = compare `on` (fst . sfst)
+--	SFst (x,_) `compare` SFst (y,_) = compare x y
+

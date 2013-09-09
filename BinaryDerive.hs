@@ -4,9 +4,6 @@ module BinaryDerive where
 
 import Data.Generics
 import Data.List
-import Sequenza
-import Projections
-import Track
 
 deriveM ::  (Typeable a, Data a) => a -> IO ()
 deriveM (a :: a) = mapM_ putStrLn . lines $ derive (undefined :: a)

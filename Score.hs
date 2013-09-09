@@ -18,6 +18,7 @@ import Control.Arrow (second, (***))
 
 import Control.Lens (makeLenses) 
 import Data.Binary (Binary (..))
+import Data.Default (Default (..))
 
 -------------------------------
 import Haskell (hystogram, floatMod, every, normalize)
@@ -36,6 +37,9 @@ data Pattern = Pattern
         }
 
 $(makeLenses ''Pattern)
+
+instance Default Pattern where
+	def = Pattern 8 64 0
 
 instance Binary Pattern where
   put (Pattern a b c) = put a >> put b >> put c
@@ -64,6 +68,8 @@ data Projection = Projection
 
 $(makeLenses ''Projection)
 
+instance Default Projection where
+	def = Projection 64 0 64 0 32 0
 
 instance Binary Projection where
   put (Projection a b c d e f) = put a >> put b >> put c >> put d >> put e >> put f

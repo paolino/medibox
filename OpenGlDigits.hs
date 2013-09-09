@@ -44,7 +44,7 @@ glyphs = [
         ,       [0,3,12,13]
         ]
 
-renderDigit :: Double -> Double -> Int -> IO ()
+renderDigit :: GLfloat -> GLfloat -> Int -> IO ()
 renderDigit h' k' n = renderPrimitive Lines $ flip mapM_ (glyphs !! n) $ \l -> do
         let k = realToFrac k'
         let h = realToFrac h'
@@ -93,13 +93,13 @@ renderDigit h' k' n = renderPrimitive Lines $ flip mapM_ (glyphs !! n) $ \l -> d
                         vertex (Vertex2 h k :: Vertex2 GLfloat)
                         vertex (Vertex2 0 0 :: Vertex2 GLfloat)
 
-renderDigitPosWH :: Double -> Double -> Double -> Double -> Double -> Double -> Int -> IO () 
+renderDigitPosWH :: GLfloat -> GLfloat -> GLfloat -> GLfloat -> GLfloat -> GLfloat -> Int -> IO () 
 renderDigitPosWH h' k x y w h n = 
         preservingMatrix $ do
                 translate $ (Vector3 (realToFrac x) (realToFrac y) 0 :: Vector3 GLfloat)
                 scale (realToFrac w)  (realToFrac h) (1 :: GLfloat)
                 renderDigit h' k n
-renderNumberPosWH :: Double -> Double -> Double -> Double -> Double -> Double -> Int -> IO ()
+renderNumberPosWH :: GLfloat -> GLfloat -> GLfloat -> GLfloat -> GLfloat -> GLfloat -> Int -> IO ()
 renderNumberPosWH h' k x y w h n
         | n < 10 = renderDigitPosWH h k x y w h n
         | otherwise = let
@@ -107,7 +107,7 @@ renderNumberPosWH h' k x y w h n
                 in renderDigitPosWH h' k x y w h r >> renderNumberPosWH h' k (x - 1.5*w) y w h d
                 
                  
-renderWordPOSWH :: Double -> Double -> Double -> Double -> Double -> Double -> String -> IO ()
+renderWordPOSWH :: GLfloat -> GLfloat -> GLfloat -> GLfloat -> GLfloat -> GLfloat -> String -> IO ()
 renderWordPOSWH h' k x y w h [] = return ()
 renderWordPOSWH h' k x y w h (z:zs) = renderDigitPosWH h' k x y w h (ord z - ord '0') >> renderWordPOSWH h' k (x + 1.5*w) y w h zs
 

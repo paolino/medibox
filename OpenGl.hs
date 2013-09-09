@@ -23,8 +23,9 @@ import Simple
 import qualified Score
 import Haskell
 import OpenGlDigits
+
 data Poin = 
-        Tr Int Int
+      Tr Int Int
         | Sq (String, Double, Double)
         | Pj (String, Double, Double)
 
@@ -90,6 +91,7 @@ main = do
   tracks <- canva (320,heightwindow,drawCube )
   projs <- canva (120,heightwindow,drawProj)
   seqs <- canva (480,heightwindow,drawSeqs)
+  conncets <- canva (360,heightwindow,drawConncets)
   -- Setup the animation
   t0 <- time
   forkIO. forM_ [0..] $ \n -> do
@@ -106,7 +108,12 @@ main = do
   idleAdd (do
     widgetQueueDraw seqs
     return True)
+    priorityLow 
+  idleAdd (do
+    widgetQueueDraw conncets
+    return True)
     priorityLow
+
   --------------------------------
   -- Setup the rest of the GUI:
   --
@@ -118,9 +125,11 @@ main = do
   boxPackStart hb tracks PackNatural 0 
   boxPackStart hb projs PackNatural 0 
   boxPackStart hb seqs PackNatural 0 
+  boxPackStart hb conncts PackNatural 0 
   widgetAddEvents projs [PointerMotionMask]
   widgetAddEvents seqs [PointerMotionMask]
   widgetAddEvents tracks [PointerMotionMask]
+  widgetAddEvents connects [PointerMotionMask]
   let prlens = ([Score.prampl, Score.proffset, Score.prwidth, Score.prshift, Score.prquant, Score.prcutin] !!)
   let prdesc = (["AMPLIFICATION","OFFSET","WIDTH","SHIFT","QUANTIFICATION","CUTIN"] !!)
   on projs motionNotifyEvent $ do
@@ -348,3 +357,9 @@ bar a c0 c1 = do
                 vertex (Vertex2 1 1 :: Vertex2 GLfloat)
                 vertex (Vertex2 0 1 :: Vertex2 GLfloat)
 
+drawConnects sc _ state = do
+  (t,ms,db,s) <- atomically $ readTVar state
+  matrixMode $= Modelview 0
+  loadIdentity
+  color (Color4 0.4 0.4 0.4 0.2 :: Color4 GLfloat)
+  
