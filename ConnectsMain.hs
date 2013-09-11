@@ -11,31 +11,8 @@ import Control.Monad
 
 
 
-data Polyg = Polyg Int 
-
-instance Sprite Polyg where
-	connections (Polyg n) =  [(0.5 + 0.92 * cos (p i)/2 , 0.5 + 0.92 * sin (p i)/2) | i <- [0 .. n - 1]]where
-		p i = fromIntegral i * 2 * pi / fromIntegral n
-	renderEdgeColor p _ _ = do
-		color $ Color4 p 1 1 0.1
-
-	renderSprite p (Polyg n) = do
-			color $ Color4 p p p 0.1
-			renderPrimitive LineLoop $ do
-				forM_ [0..n - 1] $ \i -> do
-					let step = fromIntegral i * 2 * pi / fromIntegral n
-					vertex (Vertex2 (0.5 + cos step/2) (0.5 +  sin step/2) :: Vertex2 GLfloat)
--- $(makeLenses ''Graph)
 
 
-somePoly = map (CSprite 0 (0.5,0.5) (0.1,0.1) . BSprite) 
-	[	Polyg 3
-	,	Polyg 4
-	,	Polyg 4
-	,	Polyg 5
-	,	Polyg 5
-	,	Polyg 3	
-	]
 data CSynth = CSynth 
         {       _csi :: Int
         ,       _csname :: String
@@ -49,16 +26,13 @@ someSynths = map (CSprite 0 (0.5,0.5) (0.1,0.1) . BSprite)
         ,       CSynth 0 "ABELE" ["AMPL","FEEDB","TRIM","RATE","RAMP","RING"] 
         ]
 
-mcolor :: GLfloat -> GLfloat -> GLfloat -> GLfloat -> GLfloat -> IO ()
-mcolor p r g b = color . Color4 (pn r) (pn g) (pn b) where
-	pn n = (p  + n) / (n+1)
 
 instance Sprite CSynth where
         connections (CSynth i n ps) =  
-		(zip (repeat 1.04) $ 1.5 * h : [1.5 * h + fromIntegral i * h | i <-  [0 .. length ps - 1]])  ++
-		(zip (repeat (-0.04)) $ 1.5 * h : [1.5 * h + fromIntegral i * h | i <-  [0 .. length ps - 1]]) where
+		(map (\x -> Input x False)  . zip (repeat 1.04) $  [0.5 * h + fromIntegral i * h | i <-  [0 .. length ps]])  ++
+		(map (\x -> Input x True)  . zip (repeat (-0.04)) $  [0.5 * h + fromIntegral i * h | i <-  [0 .. length ps]]) where
 		h = 1/fromIntegral (length ps  + 1)
-	renderEdgeColor p _  _ = mcolor p 4 3 2 1
+	edgeColor p  (CSynth _ _ ps)  i = kcolor p 1 (0.3 * fromIntegral (i `mod` (length ps + 1))) (0.2 * fromIntegral (i `mod` (length ps + 1))) 1
         renderSprite p c@(CSynth i n ps) = do
 			let	h = 1/(fromIntegral $ length ps + 1) 
 			 	pn n = (p  + n) / (n+1)
@@ -89,8 +63,8 @@ instance Sprite CSynth where
 					mcolor p 20 30 15 0.1 
                                 	vertex (Vertex2 1 (d + h) :: Vertex2 GLfloat)
                                 	vertex (Vertex2 0 (d + h) :: Vertex2 GLfloat)
-			color $ Color4 1 (pn 1) (pn 1) 0.1
-                        forM_ (connections c) $ \(x,y) -> renderPrimitive LineLoop $ do
+			color $ Color4 1 (pn 1) (pn 1) 1
+                        forM_ (map socketPoint $ connections c) $ \(x,y) -> renderPrimitive LineLoop $ do
 				let 	x0 = x + 0.03
 				 	x1 = x - 0.03
 				 	y1 = y - 0.03
@@ -115,12 +89,8 @@ main = do
 	(IM.fromList . zip [0..] $ someSynths)
         IM.empty
 
-  connects <- graphing ref 800 800 
-  hbox <- hBoxNew False 0
-  vbox <- vBoxNew False 0
-  set window [containerChild := hbox] 
-  boxPackStart hbox vbox PackNatural 0
-  boxPackStart vbox connects PackNatural 0
+  connects <- graphing ref 
+  set window [containerChild := connects] 
   widgetShowAll window
   dat <- widgetGetDrawWindow $ window
   cursorNew Tcross >>= drawWindowSetCursor dat . Just 
