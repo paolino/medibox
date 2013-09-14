@@ -6,7 +6,7 @@ module Haskell  where
 import Data.Monoid
 import Control.Lens
 import Data.List
-import qualified Data.IntMap as IM
+import qualified Data.Map as IM
 
 import Control.Arrow
 import Control.Monad.State
@@ -21,7 +21,7 @@ every = flip map
 
 
 
-firstFree :: IM.IntMap a -> Int
+firstFree :: (Num k, Ord k) => IM.Map k a -> k
 firstFree g 
 	| IM.size g == 0 = 0
 	| otherwise = let
