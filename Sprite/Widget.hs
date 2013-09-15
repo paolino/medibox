@@ -30,6 +30,7 @@ renderAGL f (Object _ _ x)  (Affine (toGLfloat -> cx,toGLfloat -> cy) (toGLfloat
 renderEdgeGL :: RenderEdge a IO 
 renderEdgeGL (Edge (SOutput p1 c1 _) (SInput p2 c2 _)) = do
    renderPrimitive Points $ return () -- bug ??!?
+   color (Color4 0.3 0.4 0.5 1 :: Color4 GLfloat)
    let	 v1 = fst (c1 .-. p1) > 0 
 	 v2 = fst (c2 .-. p2) > 0
 	 (x,y) = (toGLfloat *** toGLfloat) p1 :: (GLfloat, GLfloat)
@@ -56,8 +57,8 @@ renderEdgeGL (Edge (SOutput p1 c1 _) (SInput p2 c2 _)) = do
 	-- color (Color4 (linear p1 p2 i) (linear p1 p2  i) (linear p1 p2 i) 0.1 :: Color4 GLfloat)
         evalCoord1 i
 
-graphing :: Eq (SocketName a) => (a -> IO ()) ->  TVar (Graph a)  -> IO GLDrawingArea
-graphing  renderA ref = do
+graphing :: Eq (SocketName a) => (Point -> a -> a) -> (ScrollDirection -> Point -> a -> a) -> (a -> IO ()) ->  TVar (Graph a)  -> IO GLDrawingArea
+graphing  innerclick innerscroll renderA ref = do
   connecting <- newTVarIO Nothing
   coo <- newTVarIO (0,0)
   size <- newTVarIO  (1,1)
@@ -81,11 +82,56 @@ graphing  renderA ref = do
 			TripleClick -> return ()
 			DoubleClick -> return () 
 			SingleClick -> 	case b of
-				LeftButton -> writeTVar connecting . Just $ moveVertex c g
+				LeftButton -> case Control `elem` ms of
+					True -> writeTVar ref (deleteEdge c g)
+					False -> case Shift `elem` ms of
+						False -> writeTVar connecting . Just $ moveVertex c g
+						True -> writeTVar connecting . Just $ \c -> sendToVertex c g innerclick
 				RightButton -> writeTVar connecting $ newEdge c g 
 				MiddleButton -> writeTVar connecting $ modifyEdge c g  
 				_ -> return ()
 		return True
+  on connects scrollEvent $ do
+	d <- eventScrollDirection
+	ms <- eventModifier
+	liftIO . atomically $ do 
+		c  <- readTVar coo
+		let f = case d of 
+			ScrollUp -> (* 1.1)
+			ScrollDown -> (/1.1)
+		case ms == [Control] of
+			True -> modifyTVar ref $ \g -> scaleYVertex c g f
+			False -> case ms == [Shift] of 
+				True -> modifyTVar ref $ \g -> sendToVertex c g (innerscroll d) 
+				False -> modifyTVar ref $ \g -> flip (scaleXVertex c) f $ scaleYVertex c g f
+			
+	return True
+  on connects keyPressEvent $ do
+	v <- eventKeyVal
+	liftIO . atomically $ do
+		c  <- readTVar coo
+		g  <- readTVar ref 
+		case keyName v of
+			"c" ->  case cloneVertex c g of
+					Nothing -> return ()
+					Just f ->  writeTVar connecting . Just $ f
+			"d" -> writeTVar ref $ deleteVertex c g
+			_ -> return ()
+	return True
+  on connects keyReleaseEvent $ do
+	v <- eventKeyVal
+	liftIO . atomically $ do
+		c  <- readTVar coo
+		g  <- readTVar ref 
+		f <- readTVar connecting 
+		case keyName v of
+			_ -> case f of 
+				Just f -> do 
+					writeTVar ref $ f c
+					writeTVar connecting Nothing
+				Nothing -> return ()
+	return True
+
   on connects buttonReleaseEvent $ do
 	b <- eventButton
 	liftIO . atomically $ do

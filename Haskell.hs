@@ -21,12 +21,6 @@ every = flip map
 
 
 
-firstFree :: (Num k, Ord k) => IM.Map k a -> k
-firstFree g 
-	| IM.size g == 0 = 0
-	| otherwise = let
-		ks = dropWhile (\(x,y) -> x == y) $ zip [0 .. ] $ IM.keys g
-		in if null ks then IM.size g else fst . head $ ks
 
 hystogram :: RealFrac b => b -> [b] -> [(b, Int)]
 hystogram m = map (head &&& length) . groupBy (collapse m) . map (quantize m) . sort where

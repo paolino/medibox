@@ -11,8 +11,7 @@ bootGL = do
   -- Initialise the Gtk+ OpenGL extension
   -- (including reading various command line parameters)
   initGL
-  -- initialDisplayMode $= [WithDepthBuffer, DoubleBuffered]  
-  depthFunc $= Just Less -- specifies comparison function for DepthBuffer
+  depthFunc $= Nothing -- specifies comparison function for DepthBuffer
 
   clearColor $= Color4 0 0 0 1
   blend $= Enabled

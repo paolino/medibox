@@ -22,11 +22,12 @@ type Distance = Double
 type Point = (Double , Double)
 
 -- | 2D Operations, vector sum, difference and biscaling
-(.+.),(.-.),(.*.) :: Point -> Point -> Point
+(.+.),(.-.),(.*.),(./.) :: Point -> Point -> Point
 
 (x,y) .+. (x1,y1) = (x + x1,y + y1)
 (x,y) .-. (x1,y1) = (x - x1,y - y1)
 (x,y) .*. (k,h) = (x*k,y*h)
+(x,y) ./. (k,h) = (x/k,y/h)
 
 -- | 2D euclidean distance
 distance :: Point -> Point -> Distance
@@ -79,7 +80,7 @@ data Affine =  Affine
 
 $(makeLenses ''Affine)
 
-newtype ISo (a :: Versus) = ISo Int deriving (Num,Ord,Eq)
+newtype ISo (a :: Versus) = ISo Int deriving (Num,Ord,Eq, Enum)
 
 data Object a = Object 
 	{ 	_objectInputs :: M.Map (ISo Input)  (Socket a Input) 
@@ -168,6 +169,10 @@ affineDistance m c = distance c $ m ^. affineTranspose
 
 placeSocket :: Affine -> Socket a b -> Socket a b
 placeSocket a = (center %~ csplace a) . (point %~ csplace a)
+
+
+
+
 -----------------------------------
 --- Comonadic Graph Interface -----
 -----------------------------------
@@ -180,6 +185,27 @@ placeSocket a = (center %~ csplace a) . (point %~ csplace a)
 
 
 ----- vertexes -------------
+affineBack :: Affine -> Point -> Point
+affineBack (Affine c k) x = ((x .-. c) ./. k) .+. (0.5,0.5)
+
+
+sendToVertex :: Point -> Graph a -> (Point -> a -> a) -> Graph a
+sendToVertex p g f = case nearestVertexes p g of 
+	[] -> g
+	io : _ -> let Just a = g ^? vertexes . at io . traverse . _1 in
+		vertexes %~ (M.adjust (_2 . object %~ f (affineBack a p)) io) $ g 
+
+
+scaleXVertex :: Point -> Graph a -> (Double -> Double) -> Graph a
+scaleXVertex p g f = case nearestVertexes p g of 
+	[] -> g
+	io : _ -> vertexes %~ (M.adjust (_1 . affineScale . _1 %~ f) io) $ g
+
+scaleYVertex :: Point -> Graph a -> (Double -> Double) -> Graph a
+scaleYVertex p g f = case nearestVertexes p g of 
+	[] -> g
+	io : _ -> vertexes %~ (M.adjust (_1 . affineScale . _2 %~ f) io) $ g
+
 
 -- filter all edges 
 
@@ -198,7 +224,7 @@ vertexEdges g io = filterEdges g (\x -> x ^. edgeStart . isobject == io || x ^. 
 deleteVertex :: Point -> Graph a -> Graph a
 deleteVertex p g = case nearestVertexes p g of
 	[] -> g
-	io: _ -> foldr removeEdge g $ vertexEdges g io
+	io: _ -> (vertexes . at io .~ Nothing) . foldr removeEdge g $ vertexEdges g io
  
 -- sort all sockets by distance from a point
 
@@ -214,6 +240,7 @@ nearestSockets f c g = map snd . sortBy (comparing fst) $ do
 
 
 nearestVertexes p g = map (view isobject) (nearestSockets objectInputs p g) ++ map (view isobject) (nearestSockets objectInputs p g)
+
 -- sort edges by distance to a point, comparing the two distances from edge vertexes to the point sorted 
 nearestEdges 
      :: Point
@@ -245,12 +272,17 @@ socketEdges f g isoo  = filterEdges g (\x -> x ^. f == isoo)
 moveVertex :: Point -> Graph m -> Point -> Graph m
 moveVertex p g p' = case nearestVertexes p g of
 	[] -> g
-	io: _ -> vertexes %~ (M.adjust (_1 . affineTranspose .~ p') io) $ g
+	io: _ -> _moveVertex io g p'
 
-cloneVertex :: Point -> Graph m -> Either (Graph m) (Point -> Graph m)
+_moveVertex :: IObj -> Graph m -> Point -> Graph m
+_moveVertex io g p' = vertexes %~ (M.adjust (_1 . affineTranspose .~ p') io) $ g
+
+cloneVertex :: Point -> Graph m -> Maybe (Point -> Graph m)
 cloneVertex p g  = case nearestVertexes p g of
-	[] -> Left g
-	io : _ -> Right $ moveVertex p (vertexes %~ (at (succ . fst $ M.findMax $ g ^. vertexes) .~ (g ^. vertexes . at io)) $ g)
+	[] -> Nothing
+	io : _ -> let 
+		nio = newKey $ g ^. vertexes
+		in Just $ _moveVertex nio (vertexes %~ at nio .~ (g ^. vertexes . at io) $ g)
 
 
 
@@ -326,8 +358,8 @@ modifyEdge p g = case nearestEdges p g of
 		Just j -> case realizeEdge g j of
 			Nothing -> error "modifyEdge index error"
 			Just (Edge si se)  -> case socketDistance p si > socketDistance p se of
-				True -> Just $ completeEdgeOutput (j ^. edgeStart) g
-				False -> Just $ completeEdgeInput (j ^. edgeEnd) g
+				True -> Just $ completeEdgeOutput (j ^. edgeStart) (removeEdge i g)
+				False -> Just $ completeEdgeInput (j ^. edgeEnd) (removeEdge i g)
 	
 -------- 
 
