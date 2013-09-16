@@ -15,7 +15,7 @@ import Haskell
 
 
 
-data Synth = Pattern Int (M.Map Int GLfloat) | Projection Int (M.Map Int GLfloat) | Synth String
+data Synth = Pattern Int (M.Map Int GLfloat) | Projection Int (M.Map Int GLfloat) | Synth String | Bus Int | Viewer 
 
 type instance SocketName Synth = String 
 
@@ -27,14 +27,24 @@ basePattern = Object
 
 baseProjection = Object 
 		(M.singleton 0 (SInput (-0.1,0.5) (0.5,0.5) ["patternOut"]))
-		(M.singleton 0 (SOutput (1.1,0.1) (0.5,0.5) "projectionOut"))
+		(M.singleton 0 (SOutput (1.1,0.5) (0.5,0.5) "projectionOut"))
 		(Projection 6 $ M.fromList $ zip [0..5] $ repeat 0)
 
 baseSynth n x = Object
-	(M.fromList $ [(fromIntegral i,SInput (-0.1,fromIntegral j / fromIntegral n) (0.5,0.5) ["projectionOut"]) | (i,j)  <- zip [0..n-1] [0..n-1]])
+	(M.fromList $ [(fromIntegral i,SInput (-0.1,fromIntegral j / fromIntegral n) (0.5,0.5) ["projectionOut","busOut"]) | (i,j)  <- zip [0..n-1] [0..n-1]])
 	M.empty
 	(Synth x)
 
+baseBus n = Object
+		(M.singleton 0 (SInput (-0.1,0.5) (0.5,0.5) ["projectionOut"]))
+		(M.singleton 0 (SOutput (1.1,0.5) (0.5,0.5) "busOut"))
+		(Bus n)
+
+baseViewer = Object 
+		(M.singleton 0 (SInput (-0.1,0.5) (0.5,0.5) ["projectionOut", "patternOut"]))
+		M.empty
+		Viewer
+		
 scrollSynth :: ScrollDirection -> Point -> Synth -> Synth
 scrollSynth s (x,_) e@(Pattern n y) 
 	| x >=0 && x < 1 = let m = floor $ x * fromIntegral n
@@ -52,6 +62,9 @@ scrollSynth s (x,_) e@(Projection n y)
 		ScrollUp ->  min 1 $ x + 1/128
 		ScrollDown -> max 0 $ x - 1/128
 		_ -> x
+scrollSynth s (_,_) (Bus y) = Bus $ case s of
+		ScrollUp ->  min 127 $ y + 1
+		ScrollDown -> max 0 $ y - 1
 scrollSynth s (x,_) y = y
 
 setSynth :: Point -> Synth -> Synth
@@ -70,7 +83,9 @@ graph :: Graph Synth
 graph = Graph (M.fromList $ 
 	[ (0,(Affine (0.5,0.5) (0.06,0.1),basePattern))
 	, (1,(Affine (0.5,0.5) (0.12,0.1),baseProjection))
-	, (2, (Affine (0.5,0.5) (0.1,0.2),baseSynth 5 "SAMPLER")) 
+	, (2, (Affine (0.5,0.5) (0.1,0.1),baseSynth 5 "SAMPLER")) 
+	, (3,(Affine (0.5,0.5) (0.06,0.1),baseBus 0))
+	, (4,(Affine (0.5,0.5) (0.06,0.1),baseViewer 0))
 	]) M.empty M.empty
        
 
@@ -151,8 +166,30 @@ renderSynth (Synth n) = do
 			polygonSmooth $= Enabled
 			lineSmooth $= Enabled
 			color (Color4 0.6 0.7 0.8 0.1:: Color4 GLfloat)
-			renderWordPOSWH 0.5 0.5 (0.1) (0.5) (1/20) (0.1) $ n
+			renderWordPOSWH 0.5 0.5 (0.3) (0.5) (1/20) (1/10) $ n
 			color (Color4 1 0.9 0.8 0.1:: Color4 GLfloat)
+			forM_ [(0.1,0.1), (0.9,0.1),(0.9,0.9),(0.1,0.9)] $ \(xc,yc) -> 
+				renderPrimitive Polygon $ forM_ [0,0.1.. 2*pi] $ \a -> do
+					let 	x = xc + 0.1*cos a
+					 	y = yc + 0.1*sin a
+					vertex (Vertex2 x y:: Vertex2 GLfloat)
+
+			renderPrimitive Quads $ do
+                                vertex (Vertex2 0.1 0 :: Vertex2 GLfloat)
+                                vertex (Vertex2 0.9 0 :: Vertex2 GLfloat)
+                                vertex (Vertex2 0.9 1 :: Vertex2 GLfloat)
+                                vertex (Vertex2 0.1 1 :: Vertex2 GLfloat)
+			renderPrimitive Quads $ do
+                                vertex (Vertex2 0 0.1 :: Vertex2 GLfloat)
+                                vertex (Vertex2 1 0.1 :: Vertex2 GLfloat)
+                                vertex (Vertex2 1 0.9 :: Vertex2 GLfloat)
+                                vertex (Vertex2 0 0.9 :: Vertex2 GLfloat)
+renderSynth (Bus n) = do
+			polygonSmooth $= Enabled
+			lineSmooth $= Enabled
+			color (Color4 0.6 0.7 0.8 0.1:: Color4 GLfloat)
+			renderNumberPosWH 0.5 0.5 (0.9) (0.5) (1/20) (1/10) $ n
+			color (Color4 0.4 0.9 0.9 0.1:: Color4 GLfloat)
 			forM_ [(0.1,0.1), (0.9,0.1),(0.9,0.9),(0.1,0.9)] $ \(xc,yc) -> 
 				renderPrimitive Polygon $ forM_ [0,0.1.. 2*pi] $ \a -> do
 					let 	x = xc + 0.1*cos a

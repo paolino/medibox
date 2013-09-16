@@ -42,9 +42,11 @@ type family SocketName a
 
 data Versus = Input | Output
 
+type family Signal a 
+
 data Socket a b where
 	SInput :: Point -> Point -> [SocketName a] -> Socket a Input 
-	SOutput :: Point -> Point -> SocketName a -> Socket a Output
+	SOutput :: Point -> Point -> SocketName a -> ([Signal a] -> Signal a) -> Socket a Output  
 {-
 data Input a = Input
 		{	_inputPoint :: Point
@@ -59,19 +61,19 @@ point :: forall f a b . Functor f => (Point -> f Point) -> Socket a b -> f (Sock
 point = lens f g where
 	f :: Socket a b -> Point
 	f (SInput p _ _) = p
-	f (SOutput p _ _) = p
+	f (SOutput p _ _ _) = p
 	g :: Socket a b -> Point -> Socket a b
 	g (SInput p s xs) q = SInput q s xs
-	g (SOutput p s x) q = SOutput q s x
+	g (SOutput p s x f) q = SOutput q s x f
 
 center :: forall f a b . Functor f => (Point -> f Point) -> Socket a b -> f (Socket a b)
 center = lens f g where
 	f :: Socket a b -> Point
 	f (SInput _ p _) = p
-	f (SOutput _ p _) = p
+	f (SOutput _ p _ _) = p
 	g :: Socket a b -> Point -> Socket a b
 	g (SInput s p xs) q = SInput s q xs
-	g (SOutput s p x) q = SOutput s q x
+	g (SOutput s p x f ) q = SOutput s q x f
 	
 data Affine =  Affine 
 	{	_affineTranspose :: Point -- ^ transposition point
@@ -89,6 +91,12 @@ data Object a = Object
 	}
 
 $(makeLenses ''Object)
+
+evalObject :: Monoid (Signal a) => (ISo Input -> [Signal a]) -> Object a -> M.Map (ISo Output) (Signal a)
+evalObject f (Object is os _) = let 
+	e (SOutput _ _ _ g) = g ys
+	ys = map msum (map f $ M.keys is)
+	in e `fmap` os
 
 type SocketSel a b = Lens' (Object a) (M.Map (ISo b) (Socket a b))
 
@@ -115,12 +123,14 @@ newtype IEdg = IEdg Int  deriving (Num,Ord,Eq, Enum)
 
 -- | Database of objects and cords, opaque
 data Graph a = Graph
-	{	_vertexes :: M.Map IObj (Affine, Object a)
+	{	_vertexes :: M.Map IObj (Affine, (Object a, Maybe (M.Map (ISo Output) (Signal a))))
 	,	_edges :: M.Map IEdg (Edge ISoObj)
 	,	_assigned :: M.Map (ISoObj Input) (SocketName a)
 	}
 
 $(makeLenses ''Graph)
+
+
 -----------------------------
 ---- rendering --------------
 -----------------------------
