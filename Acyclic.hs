@@ -15,7 +15,7 @@ pointingBy f x ys = nubBy f $ pointingBy' x ys where
         pointingBy'  x [] = []
         pointingBy'  x ys = let 
                 (map fst -> zs,ts) = partition (f x . snd) ys
-                in zs ++ concatMap (flip pointingBy' ts) zs
+                in concatMap (flip pointingBy' ts) zs ++ zs
 
 -- | Specialized pontingBy for Eq instance node
 
@@ -57,3 +57,17 @@ acyclicFromBy f xs ys = let
                                 ms -> acyclicFromBy f (map fst ms ++ xs) us
                         _ -> False
 
+
+derootsBy ::  Eq a => (a -> a -> Bool) -> Graph a -> Maybe ([a], Graph a)
+derootsBy f [] = Nothing
+derootsBy f zs = Just (rs, deleteE rs zs ) where rs = rootsBy f zs
+
+deleteE :: Eq a => [a] -> Graph a -> Graph a
+deleteE rs = filter (\(x,y) -> not $ y `elem` rs)
+
+setOf :: Graph a -> [a]
+setOf g = map fst g ++ map snd g
+
+
+resolveBy  :: Eq a => (a -> a -> Bool) -> Graph a -> [a]
+resolveBy f g = nub $ (concat $ unfoldr (derootsBy f) g)  ++  setOf g
