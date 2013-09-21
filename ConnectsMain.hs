@@ -1,9 +1,9 @@
-{-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE TypeFamilies, GeneralizedNewtypeDeriving, DataKinds #-}
 import GL
 import OpenGlDigits
 import Control.Concurrent.STM
 
-import Graphics.UI.Gtk hiding (Point)
+import Graphics.UI.Gtk hiding (Point,Signal)
 import Graphics.UI.Gtk.OpenGL 
 import Graphics.Rendering.OpenGL  hiding (Projection)
 import qualified Data.Map as M
@@ -12,6 +12,7 @@ import Sprite.Logic
 import Sprite.Widget
 import Control.Lens hiding (set)
 import Haskell
+import Data.Monoid
 
 
 
@@ -19,15 +20,24 @@ data Synth = Pattern Int (M.Map Int GLfloat) | Projection Int (M.Map Int GLfloat
 
 type instance SocketName Synth = String 
 
+newtype N = N Int deriving (Eq, Show, Num, Integral, Real, Enum, Ord)
+instance Monoid N where
+	mempty = N 1
+	mappend = (+)
+
+mb :: [N] -> N
+mb [] = mempty
+mb xs = N . maximum . map (\(N x) -> x) $ xs
+type instance Signal Synth = N
 
 basePattern = Object 
 		(M.singleton 0 (SInput (-0.1,0.5) (0.5,0.5) ["patternOut"]))
-		(M.singleton 0 (SOutput (1.1,0.1) (0.5,0.5) "patternOut"))
+		(M.singleton 0 (SOutput (1.1,0.5) (0.5,0.5) "patternOut" (mb,mempty)))
 		(Pattern 3 $ M.fromList $ zip [0..2] $ repeat 0)
 
 baseProjection = Object 
 		(M.singleton 0 (SInput (-0.1,0.5) (0.5,0.5) ["patternOut"]))
-		(M.singleton 0 (SOutput (1.1,0.5) (0.5,0.5) "projectionOut"))
+		(M.singleton 0 (SOutput (1.1,0.5) (0.5,0.5) "projectionOut" (mb,mempty)))
 		(Projection 6 $ M.fromList $ zip [0..5] $ repeat 0)
 
 baseSynth n x = Object
@@ -37,12 +47,12 @@ baseSynth n x = Object
 
 baseBus n = Object
 		(M.singleton 0 (SInput (-0.1,0.5) (0.5,0.5) ["projectionOut"]))
-		(M.singleton 0 (SOutput (1.1,0.5) (0.5,0.5) "busOut"))
+		(M.singleton 0 (SOutput (1.1,0.5) (0.5,0.5) "busOut" (mb,mempty)))
 		(Bus n)
 
 baseViewer = Object 
 		(M.singleton 0 (SInput (-0.1,0.5) (0.5,0.5) ["projectionOut", "patternOut"]))
-		M.empty
+		(M.singleton 0 (SOutput (1.1,0.5) (0.5,0.5) "viewerOut" (mb,mempty)))
 		Viewer
 		
 scrollSynth :: ScrollDirection -> Point -> Synth -> Synth
@@ -85,12 +95,12 @@ graph = Graph (M.fromList $
 	, (1,(Affine (0.5,0.5) (0.12,0.1),baseProjection))
 	, (2, (Affine (0.5,0.5) (0.1,0.1),baseSynth 5 "SAMPLER")) 
 	, (3,(Affine (0.5,0.5) (0.06,0.1),baseBus 0))
-	, (4,(Affine (0.5,0.5) (0.06,0.1),baseViewer 0))
+	-- , (4,(Affine (0.5,0.5) (0.06,0.1),baseViewer))
 	]) M.empty M.empty
        
 
-renderSynth :: Synth -> IO ()
-renderSynth (Pattern n y) = do
+renderSynth :: Synth -> M.Map (ISo Output) (Signal Synth) -> IO ()
+renderSynth (Pattern n y) _ = do
 			let 	d = 1 / fromIntegral n
 			polygonSmooth $= Enabled
 			forM_ (M.assocs y) $ \(i,v') -> do
@@ -126,7 +136,7 @@ renderSynth (Pattern n y) = do
                                 vertex (Vertex2 1 0.1 :: Vertex2 GLfloat)
                                 vertex (Vertex2 1 0.9 :: Vertex2 GLfloat)
                                 vertex (Vertex2 0 0.9 :: Vertex2 GLfloat)
-renderSynth (Projection n y) = do
+renderSynth (Projection n y) _ = do
 			let 	d = 1 / fromIntegral n
 			polygonSmooth $= Enabled
 			forM_ (M.assocs y) $ \(i,v') -> do
@@ -162,7 +172,7 @@ renderSynth (Projection n y) = do
                                 vertex (Vertex2 1 0.9 :: Vertex2 GLfloat)
                                 vertex (Vertex2 0 0.9 :: Vertex2 GLfloat)
 				
-renderSynth (Synth n) = do
+renderSynth (Synth n) _ = do
 			polygonSmooth $= Enabled
 			lineSmooth $= Enabled
 			color (Color4 0.6 0.7 0.8 0.1:: Color4 GLfloat)
@@ -184,11 +194,12 @@ renderSynth (Synth n) = do
                                 vertex (Vertex2 1 0.1 :: Vertex2 GLfloat)
                                 vertex (Vertex2 1 0.9 :: Vertex2 GLfloat)
                                 vertex (Vertex2 0 0.9 :: Vertex2 GLfloat)
-renderSynth (Bus n) = do
+renderSynth (Bus n) v = do
 			polygonSmooth $= Enabled
 			lineSmooth $= Enabled
 			color (Color4 0.6 0.7 0.8 0.1:: Color4 GLfloat)
 			renderNumberPosWH 0.5 0.5 (0.9) (0.5) (1/20) (1/10) $ n
+			renderNumberPosWH 0.5 0.5 0.1 0.5 (1/20) (1/10) $ fromIntegral (v M.! 0)
 			color (Color4 0.4 0.9 0.9 0.1:: Color4 GLfloat)
 			forM_ [(0.1,0.1), (0.9,0.1),(0.9,0.9),(0.1,0.9)] $ \(xc,yc) -> 
 				renderPrimitive Polygon $ forM_ [0,0.1.. 2*pi] $ \a -> do

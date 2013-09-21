@@ -6,11 +6,12 @@ module Sprite.Widget where
 import Control.Arrow
 
 import Graphics.UI.Gtk hiding (Point, Socket)
-import Graphics.UI.Gtk.OpenGL 
+import Graphics.UI.Gtk.OpenGL hiding (Sink)
 import Control.Monad
 import Control.Concurrent.STM
 import Control.Monad.Trans
-import Graphics.Rendering.OpenGL 
+import Graphics.Rendering.OpenGL hiding (Sink)
+
 	
 import GL
 import Sprite.Logic
@@ -18,17 +19,17 @@ import Sprite.Logic
 toGLfloat :: Double -> GLfloat
 toGLfloat = realToFrac
 
-renderAGL :: (a -> IO ()) -> RenderObject a IO 
-renderAGL f (Object _ _ x)  (Affine (toGLfloat -> cx,toGLfloat -> cy) (toGLfloat -> sx,toGLfloat -> sy)) = do
+renderAGL :: (a -> Sink a -> IO ()) -> RenderObject a IO 
+renderAGL f (Object _ _ x) s  (Affine (toGLfloat -> cx,toGLfloat -> cy) (toGLfloat -> sx,toGLfloat -> sy)) = do
 	preservingMatrix $ do
 		translate (Vector3 cx cy 0)
 		scale sx sy 1
 		preservingMatrix $ do 
 			translate (Vector3 (-0.5) (-0.5) (0 :: GLfloat))
-			f x
+			f x s
 
 renderEdgeGL :: RenderEdge a IO 
-renderEdgeGL (Edge (SOutput p1 c1 _) (SInput p2 c2 _)) = do
+renderEdgeGL (Edge (SOutput p1 c1 _ _) (SInput p2 c2 _)) = do
    renderPrimitive Points $ return () -- bug ??!?
    color (Color4 0.3 0.4 0.5 1 :: Color4 GLfloat)
    let	 v1 = fst (c1 .-. p1) > 0 
@@ -57,7 +58,7 @@ renderEdgeGL (Edge (SOutput p1 c1 _) (SInput p2 c2 _)) = do
 	-- color (Color4 (linear p1 p2 i) (linear p1 p2  i) (linear p1 p2 i) 0.1 :: Color4 GLfloat)
         evalCoord1 i
 
-graphing :: Eq (SocketName a) => (Point -> a -> a) -> (ScrollDirection -> Point -> a -> a) -> (a -> IO ()) ->  TVar (Graph a)  -> IO GLDrawingArea
+graphing :: Eq (SocketName a) => (Point -> a -> a) -> (ScrollDirection -> Point -> a -> a) -> (a -> Sink a -> IO ()) ->  TVar (Graph a)  -> IO GLDrawingArea
 graphing  innerclick innerscroll renderA ref = do
   connecting <- newTVarIO Nothing
   coo <- newTVarIO (0,0)
