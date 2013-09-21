@@ -13,9 +13,10 @@ import Data.Typeable
 import Control.Lens hiding (set, Affine)
 import Data.Traversable
 import Data.Foldable
+import Data.Monoid
 
 import Data.Functor.Identity
-
+import Acyclic
 
 
 type Distance = Double
@@ -92,10 +93,10 @@ data Object a = Object
 
 $(makeLenses ''Object)
 
-evalObject :: Monoid (Signal a) => (ISo Input -> [Signal a]) -> Object a -> M.Map (ISo Output) (Signal a)
+evalObject :: forall a. Monoid (Signal a) => (ISo Input -> [Signal a]) -> Object a -> M.Map (ISo Output) (Signal a)
 evalObject f (Object is os _) = let 
 	e (SOutput _ _ _ g) = g ys
-	ys = map msum (map f $ M.keys is)
+	ys = map mconcat (map f $ M.keys is) :: [Signal a]
 	in e `fmap` os
 
 type SocketSel a b = Lens' (Object a) (M.Map (ISo b) (Socket a b))
@@ -130,7 +131,9 @@ data Graph a = Graph
 
 $(makeLenses ''Graph)
 
-
+mkAcyclic :: Graph a -> Acyclic IObj
+mkAcyclic g = map (\(Edge u d) -> (u ^. isobject, d ^. isobject)) . M.elems $ g ^. edges
+{-
 -----------------------------
 ---- rendering --------------
 -----------------------------
@@ -385,4 +388,4 @@ modifyEdge p g = case nearestEdges p g of
 
 
 
-
+-}

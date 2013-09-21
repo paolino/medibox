@@ -2,15 +2,15 @@
 
 -- | Simple graph, acyclic test, roots, reacheable subset of nodes.
 
-module Graph where
+module Acyclic where
 
 import Data.List 
 
 -- | A graph as a set of directed links
-type Graph a = [(a,a)]
+type Acyclic a = [(a,a)]
 
 -- | Select the subset of nodes which are pointing to a given node, given an equality test for nodes
-pointingBy :: (a -> a -> Bool) -> a -> Graph a -> [a]
+pointingBy :: (a -> a -> Bool) -> a -> Acyclic a -> [a]
 pointingBy f x ys = nubBy f $ pointingBy' x ys where
         pointingBy'  x [] = []
         pointingBy'  x ys = let 
@@ -19,34 +19,34 @@ pointingBy f x ys = nubBy f $ pointingBy' x ys where
 
 -- | Specialized pontingBy for Eq instance node
 
-pointing :: Eq a => a -> Graph a -> [a]
+pointing :: Eq a => a -> Acyclic a -> [a]
 pointing = pointingBy (==)
 
 -- | Select the subset of points which have no dependencies, given an equality test for nodes
 
-rootsBy :: (a -> a -> Bool) -> Graph a -> [a]
+rootsBy :: (a -> a -> Bool) -> Acyclic a -> [a]
 rootsBy f zs = let 
         (xs,ys) = unzip zs
         in deleteFirstsBy f (nubBy f ys) xs
 
 -- | Specialized rootBy for Eq instance node
 
-roots :: Eq a =>  Graph a -> [a]
+roots :: Eq a =>  Acyclic a -> [a]
 roots = rootsBy (==)
        
 -- | Determine the absolute acyclicity of a graph, given an equality test for nodes
 
-acyclicBy :: (a -> a -> Bool) -> Graph a -> Bool
+acyclicBy :: (a -> a -> Bool) -> Acyclic a -> Bool
 acyclicBy f xs = let 
         zs = rootsBy f xs
         in acyclicFromBy f zs xs
 
 -- | Specialized acyclicBy for Eq instance node
-acyclic :: Eq a => Graph a -> Bool
+acyclic :: Eq a => Acyclic a -> Bool
 acyclic = acyclicBy (==)
 
 -- | Determine the relative to a given set of nodes of a graph, given an equality test for nodes
-acyclicFromBy :: (a -> a -> Bool) -> [a] -> Graph a -> Bool
+acyclicFromBy :: (a -> a -> Bool) -> [a] -> Acyclic a -> Bool
 acyclicFromBy f xs ys = let 
         (ms,us) = partition ((\x -> any (f x) xs) . snd)  ys
         in case us of 
