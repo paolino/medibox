@@ -2,7 +2,7 @@
 
 -- | Simple graph, acyclic test, roots, reacheable subset of nodes.
 
-module Graph where
+module Acyclic where
 
 import Data.List 
 
@@ -47,15 +47,16 @@ acyclic = acyclicBy (==)
 
 -- | Determine the relative to a given set of nodes of a graph, given an equality test for nodes
 acyclicFromBy :: (a -> a -> Bool) -> [a] -> Graph a -> Bool
-acyclicFromBy f xs ys = let 
-        (ms,us) = partition ((\x -> any (f x) xs) . snd)  ys
-        in case us of 
-                [] -> True
-                us -> case intersectBy f (map fst us) xs of 
-                        [] ->  case ms of 
-                                [] -> False 
-                                ms -> acyclicFromBy f (map fst ms ++ xs) us
-                        _ -> False
+acyclicFromBy f xs ys = case partition ((\x -> any (f x) xs) . snd) ys of
+		(_,[]) -> True
+
+		([],_) -> False
+		(us,ms) -> acyclicFromBy f (map fst ms) us
+acyclicPapa :: Eq a => [a] -> [(a,a)] -> Bool
+acyclicPapa xs ys = case partition ((`elem` xs) . snd) ys of
+		(_,[]) -> True
+		([],_) -> False
+		(us,ms) -> acyclicPapa (map fst ms) us
 
 
 derootsBy ::  Eq a => (a -> a -> Bool) -> Graph a -> Maybe ([a], Graph a)
@@ -71,3 +72,8 @@ setOf g = map fst g ++ map snd g
 
 resolveBy  :: Eq a => (a -> a -> Bool) -> Graph a -> [a]
 resolveBy f g = nub $ (concat $ unfoldr (derootsBy f) g)  ++  setOf g
+
+
+dfs x [] = [x]
+dfs x ys = case partition ((== x) . snd) ys of
+	(zs,ys') -> concatMap (flip dfs ys' . fst) zs

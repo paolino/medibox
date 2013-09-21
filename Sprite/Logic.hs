@@ -17,6 +17,8 @@ import Data.Foldable
 import Data.Functor.Identity
 
 import Data.Monoid
+import qualified Acyclic as Ac
+import Debug.Trace
 
 type Distance = Double
 type Point = (Double , Double)
@@ -103,9 +105,13 @@ data Edge a = Edge
 
 $(makeLenses ''Edge)
 
+
+
+
+
 type JackSel a b = Lens' (Edge a) (a b)
 
-newtype IObj = IObj Int  deriving (Num,Ord,Eq, Enum)
+newtype IObj = IObj Int  deriving (Num,Ord,Eq, Enum, Show)
 
 data ISoObj (a::Versus) = ISoObj 
 	{	_isobject  :: IObj 
@@ -138,12 +144,12 @@ $(makeLenses ''Graph)
 type RenderEdge  a m = Edge (Socket a) -> m ()
 
 -- render an object action
-type RenderObject a m = Object a -> Affine -> m ()
+type RenderObject a m = Object a -> Sink a -> Affine -> m ()
 
 
 renderGraph :: (Monad m) => RenderEdge  a m -> RenderObject a m -> Graph a -> m ()
 renderGraph re ro g@(Graph sps es as) = do
-	forM_ (M.elems sps) $ \(a,x) -> ro x a 
+	forM_ (M.assocs sps) $ \(i,(a,x)) -> ro x (sinkObject g i) a 
 	forM_ (M.elems es) $ \e -> case realizeEdge g e of 
 		Nothing -> error "lookup index failed"
 		Just eas -> re eas 
@@ -196,6 +202,13 @@ getValue  g o i = let
 updateObject :: Monoid (Signal a) => IObj  -> Graph a -> Graph a
 updateObject o g = vertexes . at o %~ fmap (second $  touchObject (getValue g o)) $ g
 
+type Sink a = M.Map (ISo Output) (Signal a)
+
+sinkObject :: Graph a -> IObj -> Sink a 
+sinkObject g o = case g ^. vertexes . at o of
+	Nothing -> error "sinkObject index error"
+	Just (_,Object _ os _) -> fmap (\(SOutput _ _ _ (_,ro)) -> ro) os
+	
 -----------------------------------
 --- Comonadic Graph Interface -----
 -----------------------------------
@@ -337,7 +350,12 @@ completeEdgeInput j g p =
 		Nothing -> error "completeEdgeOutput index error"
 		Just (SInput _ _ ns) -> case filter (judgeOutputSockets ns g j ) $  nearestSockets objectOutputs p g of
 			[] -> g
-			i : _ -> addEdge (Edge i j) g
+			i : _ -> let 	g' = addEdge (Edge i j) g
+					es = map (\(Edge x y) -> (x ^. isobject, y ^. isobject))  (M.elems  $ g' ^. edges)
+
+				in case Ac.acyclic es of
+					False -> g
+					True -> g'
 
 judgeOutputSockets :: Eq (SocketName a) => [SocketName a] -> Graph a -> ISoObj Input -> ISoObj Output -> Bool
 judgeOutputSockets ns g j i = case realizeSocket objectOutputs g i of
@@ -350,7 +368,11 @@ completeEdgeOutput j g p =
 		Nothing -> error "completeEdgeOutput index error"
 		Just (SOutput _ _ n _) -> case filter (judgeInputSockets n g) $  nearestSockets objectInputs p g of
 			[] -> g
-			i : _ -> addEdge (Edge j i) g 
+			i : _ -> let 	g' = addEdge (Edge j i) g
+					es = map (\(Edge x y) -> (x ^. isobject, y ^. isobject))  (M.elems  $ g' ^. edges)
+				in case Ac.acyclic es of
+					False -> g
+					True -> trace (show es) $ g'
 
 judgeInputSockets :: Eq (SocketName a) => SocketName a -> Graph a -> ISoObj Input -> Bool
 judgeInputSockets n g i = case realizeSocket objectInputs g i of
