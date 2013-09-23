@@ -5,7 +5,7 @@ module Sprite.Widget where
 
 import Control.Arrow
 
-import Graphics.UI.Gtk hiding (Point, Socket)
+import Graphics.UI.Gtk hiding (Point, Socket, Object)
 import Graphics.UI.Gtk.OpenGL hiding (Sink)
 import Control.Monad
 import Control.Concurrent.STM
@@ -19,14 +19,14 @@ import Sprite.Logic
 toGLfloat :: Double -> GLfloat
 toGLfloat = realToFrac
 
-renderAGL :: (a -> Sink a -> IO ()) -> RenderObject a IO 
-renderAGL f (Object _ _ x) s  (Affine (toGLfloat -> cx,toGLfloat -> cy) (toGLfloat -> sx,toGLfloat -> sy)) = do
+renderAGL :: (Object a -> IO a) -> RenderObject a IO 
+renderAGL f x (Affine (toGLfloat -> cx,toGLfloat -> cy) (toGLfloat -> sx,toGLfloat -> sy)) = do
 	preservingMatrix $ do
 		translate (Vector3 cx cy 0)
 		scale sx sy 1
 		preservingMatrix $ do 
 			translate (Vector3 (-0.5) (-0.5) (0 :: GLfloat))
-			f x s
+			f x 
 
 renderEdgeGL :: RenderEdge a IO 
 renderEdgeGL (Edge (SOutput p1 c1 _ _) (SInput p2 c2 _)) = do
@@ -58,7 +58,7 @@ renderEdgeGL (Edge (SOutput p1 c1 _ _) (SInput p2 c2 _)) = do
 	-- color (Color4 (linear p1 p2 i) (linear p1 p2  i) (linear p1 p2 i) 0.1 :: Color4 GLfloat)
         evalCoord1 i
 
-graphing :: Eq (SocketName a) => (Point -> a -> a) -> (ScrollDirection -> Point -> a -> a) -> (a -> Sink a -> IO ()) ->  TVar (Graph a)  -> IO GLDrawingArea
+graphing :: Eq (SocketName a) => (Point -> a -> a) -> (ScrollDirection -> Point -> a -> a) -> (Object a  -> IO a) ->  TVar (Graph a)  -> IO GLDrawingArea
 graphing  innerclick innerscroll renderA ref = do
   connecting <- newTVarIO Nothing
   coo <- newTVarIO (0,0)
@@ -69,7 +69,8 @@ graphing  innerclick innerscroll renderA ref = do
 	  g <- atomically $ readTVar ref
 	  c <- atomically $ readTVar coo
 	  conn <- atomically $ readTVar connecting
-	  renderGraph renderEdgeGL (renderAGL renderA)  $ maybe g ($ c) conn
+	  g' <- renderGraph renderEdgeGL (renderAGL renderA)  $ maybe g ($ c) conn
+          atomically $ writeTVar ref g'
   widgetSetEvents connects [AllEventsMask]
   on connects buttonPressEvent $ do
 	b <- eventButton

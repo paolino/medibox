@@ -1,7 +1,7 @@
 {-# LANGUAGE TemplateHaskell, DeriveFunctor, ExistentialQuantification, GADTs, TypeFamilies, GeneralizedNewtypeDeriving, TypeOperators, MultiParamTypeClasses, DeriveTraversable, DeriveFoldable, DataKinds, ScopedTypeVariables, Rank2Types, FlexibleContexts  #-}
 module Sprite.Logic where
 
-import Prelude hiding (sequence, any, foldr, elem)
+import Prelude hiding (sequence, any, foldr, elem, mapM)
 import Data.List hiding (any, foldr, elem)
 import Data.Maybe
 import Data.Ord
@@ -16,12 +16,11 @@ import Data.Foldable
 import Data.Monoid
 
 import Data.Functor.Identity
-import Acyclic
 
 
 import Data.Monoid
-import qualified Acyclic as Ac
 import Debug.Trace
+import Data.Graph.Topsort
 
 type Distance = Double
 type Point = (Double , Double)
@@ -52,16 +51,7 @@ type family Signal a
 data Socket a b where
 	SInput :: Point -> Point -> [SocketName a] -> Socket a Input 
 	SOutput :: Point -> Point -> SocketName a -> ([Signal a] -> Signal a, Signal a) -> Socket a Output  
-{-
-data Input a = Input
-		{	_inputPoint :: Point
-		,	_inputAccept :: [SocketName a]
-		}
-data Output a = Ouput  
-		{	_outputPoint :: Point
-		,	_outputName :: SocketName a
-		}
--}
+
 point :: forall f a b . Functor f => (Point -> f Point) -> Socket a b -> f (Socket a b)
 point = lens f g where
 	f :: Socket a b -> Point
@@ -96,12 +86,6 @@ data Object a = Object
 	}
 
 $(makeLenses ''Object)
-
-evalObject :: forall a. Monoid (Signal a) => (ISo Input -> [Signal a]) -> Object a -> M.Map (ISo Output) (Signal a)
-evalObject f (Object is os _) = let 
-	e (SOutput _ _ _ g) = g ys
-	ys = map mconcat (map f $ M.keys is) :: [Signal a]
-	in e `fmap` os
 
 type SocketSel a b = Lens' (Object a) (M.Map (ISo b) (Socket a b))
 
@@ -139,7 +123,7 @@ data Graph a = Graph
 
 $(makeLenses ''Graph)
 
-mkAcyclic :: Graph a -> Acyclic IObj
+mkAcyclic :: Graph a -> [(IObj,IObj)]
 mkAcyclic g = map (\(Edge u d) -> (u ^. isobject, d ^. isobject)) . M.elems $ g ^. edges
 -----------------------------
 ---- rendering --------------
@@ -153,15 +137,15 @@ mkAcyclic g = map (\(Edge u d) -> (u ^. isobject, d ^. isobject)) . M.elems $ g 
 type RenderEdge  a m = Edge (Socket a) -> m ()
 
 -- render an object action
-type RenderObject a m = Object a -> Sink a -> Affine -> m ()
+type RenderObject a m = Object a -> Affine -> m a
 
-
-renderGraph :: (Monad m) => RenderEdge  a m -> RenderObject a m -> Graph a -> m ()
+renderGraph :: (Monad m, Functor m) => RenderEdge  a m -> RenderObject a m -> Graph a -> m (Graph a)
 renderGraph re ro g@(Graph sps es as) = do
-	forM_ (M.assocs sps) $ \(i,(a,x)) -> ro x (sinkObject g i) a 
+	sps' <- mapM (\(a, x@(Object is es _)) -> fmap ((,) a . Object is es) $ ro x a ) sps 
 	forM_ (M.elems es) $ \e -> case realizeEdge g e of 
 		Nothing -> error "lookup index failed"
 		Just eas -> re eas 
+        return (Graph sps' es as)
 
 realizeEdge :: Graph a -> Edge ISoObj -> (Maybe  (Edge (Socket a)))
 realizeEdge g e = do 
@@ -211,12 +195,6 @@ getValue  g o i = let
 updateObject :: Monoid (Signal a) => IObj  -> Graph a -> Graph a
 updateObject o g = vertexes . at o %~ fmap (second $  touchObject (getValue g o)) $ g
 
-type Sink a = M.Map (ISo Output) (Signal a)
-
-sinkObject :: Graph a -> IObj -> Sink a 
-sinkObject g o = case g ^. vertexes . at o of
-	Nothing -> error "sinkObject index error"
-	Just (_,Object _ os _) -> fmap (\(SOutput _ _ _ (_,ro)) -> ro) os
 	
 -----------------------------------
 --- Comonadic Graph Interface -----
@@ -362,9 +340,10 @@ completeEdgeInput j g p =
 			i : _ -> let 	g' = addEdge (Edge i j) g
 					es = map (\(Edge x y) -> (x ^. isobject, y ^. isobject))  (M.elems  $ g' ^. edges)
 
-				in case Ac.acyclic es of
-					False -> g
-					True -> g'
+				in case tsort es of
+					Nothing -> g
+					_ -> trace (show es) $ g'
+
 
 judgeOutputSockets :: Eq (SocketName a) => [SocketName a] -> Graph a -> ISoObj Input -> ISoObj Output -> Bool
 judgeOutputSockets ns g j i = case realizeSocket objectOutputs g i of
@@ -379,9 +358,9 @@ completeEdgeOutput j g p =
 			[] -> g
 			i : _ -> let 	g' = addEdge (Edge j i) g
 					es = map (\(Edge x y) -> (x ^. isobject, y ^. isobject))  (M.elems  $ g' ^. edges)
-				in case Ac.acyclic es of
-					False -> g
-					True -> trace (show es) $ g'
+				in case tsort es of
+					Nothing -> g
+					_ -> trace (show es) $ g'
 
 judgeInputSockets :: Eq (SocketName a) => SocketName a -> Graph a -> ISoObj Input -> Bool
 judgeInputSockets n g i = case realizeSocket objectInputs g i of
@@ -415,6 +394,7 @@ modifyEdge p g = case nearestEdges p g of
 				True -> Just $ completeEdgeOutput (j ^. edgeStart) (removeEdge i g)
 				False -> Just $ completeEdgeInput (j ^. edgeEnd) (removeEdge i g)
 	
+{-
 -------- 
 
 

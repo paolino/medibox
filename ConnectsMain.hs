@@ -1,9 +1,9 @@
-{-# LANGUAGE TypeFamilies, GeneralizedNewtypeDeriving, DataKinds #-}
+{-# LANGUAGE TypeFamilies, GeneralizedNewtypeDeriving, DataKinds, ViewPatterns #-}
 import GL
 import OpenGlDigits
 import Control.Concurrent.STM
 
-import Graphics.UI.Gtk hiding (Point,Signal)
+import Graphics.UI.Gtk hiding (Point,Signal, Object)
 import Graphics.UI.Gtk.OpenGL 
 import Graphics.Rendering.OpenGL  hiding (Projection)
 import qualified Data.Map as M
@@ -47,7 +47,7 @@ baseSynth n x = Object
 
 baseBus n = Object
 		(M.singleton 0 (SInput (-0.1,0.5) (0.5,0.5) ["projectionOut"]))
-		(M.singleton 0 (SOutput (1.1,0.5) (0.5,0.5) "busOut" (mb,mempty)))
+		M.empty -- (M.singleton 0 (SOutput (1.1,0.5) (0.5,0.5) "busOut" (mb,mempty)))
 		(Bus n)
 
 baseViewer = Object 
@@ -99,8 +99,8 @@ graph = Graph (M.fromList $
 	]) M.empty M.empty
        
 
-renderSynth :: Synth -> M.Map (ISo Output) (Signal Synth) -> IO ()
-renderSynth (Pattern n y) _ = do
+renderSynth :: Object Synth -> IO Synth
+renderSynth (view object -> Pattern n y)  = do
 			let 	d = 1 / fromIntegral n
 			polygonSmooth $= Enabled
 			forM_ (M.assocs y) $ \(i,v') -> do
@@ -136,7 +136,8 @@ renderSynth (Pattern n y) _ = do
                                 vertex (Vertex2 1 0.1 :: Vertex2 GLfloat)
                                 vertex (Vertex2 1 0.9 :: Vertex2 GLfloat)
                                 vertex (Vertex2 0 0.9 :: Vertex2 GLfloat)
-renderSynth (Projection n y) _ = do
+                        return $ Pattern n y 
+renderSynth (view object -> Projection n y)  = do
 			let 	d = 1 / fromIntegral n
 			polygonSmooth $= Enabled
 			forM_ (M.assocs y) $ \(i,v') -> do
@@ -171,8 +172,8 @@ renderSynth (Projection n y) _ = do
                                 vertex (Vertex2 1 0.1 :: Vertex2 GLfloat)
                                 vertex (Vertex2 1 0.9 :: Vertex2 GLfloat)
                                 vertex (Vertex2 0 0.9 :: Vertex2 GLfloat)
-				
-renderSynth (Synth n) _ = do
+			return $ Projection n y
+renderSynth (view object -> Synth n)  = do
 			polygonSmooth $= Enabled
 			lineSmooth $= Enabled
 			color (Color4 0.6 0.7 0.8 0.1:: Color4 GLfloat)
@@ -194,12 +195,13 @@ renderSynth (Synth n) _ = do
                                 vertex (Vertex2 1 0.1 :: Vertex2 GLfloat)
                                 vertex (Vertex2 1 0.9 :: Vertex2 GLfloat)
                                 vertex (Vertex2 0 0.9 :: Vertex2 GLfloat)
-renderSynth (Bus n) v = do
+                        return $ Synth n
+renderSynth (view object -> Bus n)  = do
 			polygonSmooth $= Enabled
 			lineSmooth $= Enabled
 			color (Color4 0.6 0.7 0.8 0.1:: Color4 GLfloat)
 			renderNumberPosWH 0.5 0.5 (0.9) (0.5) (1/20) (1/10) $ n
-			renderNumberPosWH 0.5 0.5 0.1 0.5 (1/20) (1/10) $ fromIntegral (v M.! 0)
+			-- renderNumberPosWH 0.5 0.5 0.1 0.5 (1/20) (1/10) $ fromIntegral (v M.! 0)
 			color (Color4 0.4 0.9 0.9 0.1:: Color4 GLfloat)
 			forM_ [(0.1,0.1), (0.9,0.1),(0.9,0.9),(0.1,0.9)] $ \(xc,yc) -> 
 				renderPrimitive Polygon $ forM_ [0,0.1.. 2*pi] $ \a -> do
@@ -217,6 +219,7 @@ renderSynth (Bus n) v = do
                                 vertex (Vertex2 1 0.1 :: Vertex2 GLfloat)
                                 vertex (Vertex2 1 0.9 :: Vertex2 GLfloat)
                                 vertex (Vertex2 0 0.9 :: Vertex2 GLfloat)
+                        return $ Bus n
 			{-
 			let	h = 1/(fromIntegral $ length ps + 1) 
 			 	pn n = (p  + n) / (n+1)
