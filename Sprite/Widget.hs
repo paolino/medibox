@@ -3,7 +3,7 @@
 module Sprite.Widget where
 
 
-import Control.Arrow
+import Control.Arrow ((***))
 
 import Graphics.UI.Gtk hiding (Point, Socket, Object)
 import Graphics.UI.Gtk.OpenGL hiding (Sink)
@@ -12,6 +12,7 @@ import Control.Concurrent.STM
 import Control.Monad.Trans
 import Graphics.Rendering.OpenGL hiding (Sink)
 
+import Data.List.Zipper
 	
 import GL
 import Sprite.Logic
@@ -19,7 +20,7 @@ import Sprite.Logic
 toGLfloat :: Double -> GLfloat
 toGLfloat = realToFrac
 
-renderAGL :: (Object a -> IO a) -> RenderObject a IO 
+renderAGL :: (Object a -> IO ()) -> RenderObject a IO 
 renderAGL f x (Affine (toGLfloat -> cx,toGLfloat -> cy) (toGLfloat -> sx,toGLfloat -> sy)) = do
 	preservingMatrix $ do
 		translate (Vector3 cx cy 0)
@@ -58,19 +59,31 @@ renderEdgeGL (Edge (SOutput p1 c1 _ _) (SInput p2 c2 _)) = do
 	-- color (Color4 (linear p1 p2 i) (linear p1 p2  i) (linear p1 p2 i) 0.1 :: Color4 GLfloat)
         evalCoord1 i
 
-graphing :: Eq (SocketName a) => (Point -> a -> a) -> (ScrollDirection -> Point -> a -> a) -> (Object a  -> IO a) ->  TVar (Graph a)  -> IO GLDrawingArea
+addGraph ref x = modifyTVar ref $ insert x . head . dropWhile (not . beginp) . iterate pop
+
+graphing 
+	:: Eq (SocketName a) 
+	=> (Point -> a -> STM a) 
+	-> (ScrollDirection -> Point -> a -> STM a) 
+	-> (Object a  -> IO ()) 
+	->  TVar (Zipper (Graph a))
+	-> IO GLDrawingArea
 graphing  innerclick innerscroll renderA ref = do
+  let saferight x = let 
+	x' = right x
+	in if endp x' then  x else x'
   connecting <- newTVarIO Nothing
   coo <- newTVarIO (0,0)
   size <- newTVarIO  (1,1)
   lineSmooth $= Enabled
 
   connects <- mkCanva size . const $  do
-	  g <- atomically $ readTVar ref
+	  g <- fmap cursor . atomically $ readTVar ref
 	  c <- atomically $ readTVar coo
 	  conn <- atomically $ readTVar connecting
-	  g' <- renderGraph renderEdgeGL (renderAGL renderA)  $ maybe g ($ c) conn
-          atomically $ writeTVar ref g'
+	  case conn of 
+		Nothing -> renderGraph renderEdgeGL (renderAGL renderA) g
+		Just f -> atomically (f c) >>= renderGraph renderEdgeGL (renderAGL renderA)  
   widgetSetEvents connects [AllEventsMask]
   on connects buttonPressEvent $ do
 	b <- eventButton
@@ -78,58 +91,67 @@ graphing  innerclick innerscroll renderA ref = do
 	ms <- eventModifier
 	liftIO . atomically $ do
 		
-		g  <- readTVar ref 
+		g  <- cursor `fmap` readTVar ref 
 		c  <- readTVar coo
 		case cl of
 			TripleClick -> return ()
 			DoubleClick -> return () 
 			SingleClick -> 	case b of
 				LeftButton -> case Control `elem` ms of
-					True -> writeTVar ref (deleteEdge c g)
+					True -> addGraph ref (deleteEdge c g)
 					False -> case Shift `elem` ms of
-						False -> writeTVar connecting . Just $ moveVertex c g
+						False -> writeTVar connecting . Just $ return . moveVertex c g
 						True -> writeTVar connecting . Just $ \c -> sendToVertex c g innerclick
-				RightButton -> writeTVar connecting $ newEdge c g 
-				MiddleButton -> writeTVar connecting $ modifyEdge c g  
+				RightButton -> writeTVar connecting $ fmap (fmap return) $ newEdge c g 
+				MiddleButton -> writeTVar connecting $ fmap (fmap return) $ modifyEdge c g  
 				_ -> return ()
 		return True
   on connects scrollEvent $ do
 	d <- eventScrollDirection
 	ms <- eventModifier
 	liftIO . atomically $ do 
+		g <- cursor `fmap`  readTVar ref 
 		c  <- readTVar coo
 		let f = case d of 
 			ScrollUp -> (* 1.1)
 			ScrollDown -> (/1.1)
 		case ms == [Control] of
-			True -> modifyTVar ref $ \g -> scaleYVertex c g f
+			True -> addGraph ref $ scaleYVertex c g f
 			False -> case ms == [Shift] of 
-				True -> modifyTVar ref $ \g -> sendToVertex c g (innerscroll d) 
-				False -> modifyTVar ref $ \g -> flip (scaleXVertex c) f $ scaleYVertex c g f
+				True -> sendToVertex c g (innerscroll d) >>= addGraph ref 
+				False -> addGraph ref . flip (scaleXVertex c) f $ scaleYVertex c g f
 			
 	return True
   on connects keyPressEvent $ do
 	v <- eventKeyVal
+	ms <- eventModifier
 	liftIO . atomically $ do
 		c  <- readTVar coo
-		g  <- readTVar ref 
+		g  <-  cursor `fmap` readTVar ref 
 		case keyName v of
 			"c" ->  case cloneVertex c g of
 					Nothing -> return ()
-					Just f ->  writeTVar connecting . Just $ f
-			"d" -> writeTVar ref $ deleteVertex c g
+					Just f ->  writeTVar connecting . Just $ return . f
+			"d" -> addGraph ref $ deleteVertex c g
+			
+			"z" -> case ms of
+					[Control] -> modifyTVar ref saferight		
+					_ -> return ()
+			"y" -> case ms of
+					[Control] -> modifyTVar ref left
+					_ -> return ()
 			_ -> return ()
 	return True
   on connects keyReleaseEvent $ do
 	v <- eventKeyVal
 	liftIO . atomically $ do
 		c  <- readTVar coo
-		g  <- readTVar ref 
+		g  <-  cursor `fmap` readTVar ref 
 		f <- readTVar connecting 
 		case keyName v of
 			_ -> case f of 
 				Just f -> do 
-					writeTVar ref $ f c
+					f c >>= addGraph ref 
 					writeTVar connecting Nothing
 				Nothing -> return ()
 	return True
@@ -137,13 +159,13 @@ graphing  innerclick innerscroll renderA ref = do
   on connects buttonReleaseEvent $ do
 	b <- eventButton
 	liftIO . atomically $ do
-		g <- readTVar ref 
+		g <- cursor `fmap`  readTVar ref 
 		c <- readTVar coo
 		f <- readTVar connecting 
 		case b of 
 			_ -> case f of 
 				Just f -> do 
-					writeTVar ref $ f c
+					f c >>= addGraph ref 
 					writeTVar connecting Nothing
 				Nothing -> return ()
 

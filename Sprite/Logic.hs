@@ -14,6 +14,7 @@ import Control.Lens hiding (set, Affine)
 import Data.Traversable
 import Data.Foldable
 import Data.Monoid
+import Control.Applicative
 
 import Data.Functor.Identity
 
@@ -137,15 +138,14 @@ mkAcyclic g = map (\(Edge u d) -> (u ^. isobject, d ^. isobject)) . M.elems $ g 
 type RenderEdge  a m = Edge (Socket a) -> m ()
 
 -- render an object action
-type RenderObject a m = Object a -> Affine -> m a
+type RenderObject a m = Object a -> Affine -> m () 
 
-renderGraph :: (Monad m, Functor m) => RenderEdge  a m -> RenderObject a m -> Graph a -> m (Graph a)
+renderGraph :: (Monad m, Functor m) => RenderEdge  a m -> RenderObject a m -> Graph a -> m ()
 renderGraph re ro g@(Graph sps es as) = do
-	sps' <- mapM (\(a, x@(Object is es _)) -> fmap ((,) a . Object is es) $ ro x a ) sps 
+	forM_ sps $ \(a, x) -> ro x a 
 	forM_ (M.elems es) $ \e -> case realizeEdge g e of 
 		Nothing -> error "lookup index failed"
 		Just eas -> re eas 
-        return (Graph sps' es as)
 
 realizeEdge :: Graph a -> Edge ISoObj -> (Maybe  (Edge (Socket a)))
 realizeEdge g e = do 
@@ -212,11 +212,11 @@ affineBack :: Affine -> Point -> Point
 affineBack (Affine c k) x = ((x .-. c) ./. k) .+. (0.5,0.5)
 
 
-sendToVertex :: Point -> Graph a -> (Point -> a -> a) -> Graph a
+sendToVertex :: (Functor m, Applicative m) => Point -> Graph a -> (Point -> a -> m a) -> m (Graph a)
 sendToVertex p g f = case nearestVertexes p g of 
-	[] -> g
+	[] -> pure g
 	io : _ -> let Just a = g ^? vertexes . at io . traverse . _1 in
-		vertexes %~ (M.adjust (_2 . object %~ f (affineBack a p)) io) $ g 
+		vertexes %%~ (ix io (_2 . object %%~ f (affineBack a p))) $ g 
 
 
 scaleXVertex :: Point -> Graph a -> (Double -> Double) -> Graph a

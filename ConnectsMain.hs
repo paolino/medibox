@@ -13,6 +13,7 @@ import Sprite.Widget
 import Control.Lens hiding (set)
 import Haskell
 import Data.Monoid
+import Data.List.Zipper (insert,empty)
 
 
 
@@ -55,38 +56,38 @@ baseViewer = Object
 		(M.singleton 0 (SOutput (1.1,0.5) (0.5,0.5) "viewerOut" (mb,mempty)))
 		Viewer
 		
-scrollSynth :: ScrollDirection -> Point -> Synth -> Synth
+scrollSynth :: ScrollDirection -> Point -> Synth -> STM Synth
 scrollSynth s (x,_) e@(Pattern n y) 
 	| x >=0 && x < 1 = let m = floor $ x * fromIntegral n
-			in Pattern n $ at m  %~ fmap f $ y
-	| otherwise = e
+			in return . Pattern n $ at m  %~ fmap f $ y
+	| otherwise = return e
 	where f x = case s of
 		ScrollUp ->  min 1 $ x + 1/128
 		ScrollDown -> max 0 $ x - 1/128
 		_ -> x
 scrollSynth s (x,_) e@(Projection n y) 
 	| x >=0 && x < 1 = let m = floor $ x * fromIntegral n
-			in Projection n $ at m  %~ fmap f $ y
-	| otherwise = e
+			in return . Projection n $ at m  %~ fmap f $ y
+	| otherwise = return e
 	where f x = case s of
 		ScrollUp ->  min 1 $ x + 1/128
 		ScrollDown -> max 0 $ x - 1/128
 		_ -> x
-scrollSynth s (_,_) (Bus y) = Bus $ case s of
+scrollSynth s (_,_) (Bus y) = return . Bus $ case s of
 		ScrollUp ->  min 127 $ y + 1
 		ScrollDown -> max 0 $ y - 1
-scrollSynth s (x,_) y = y
+scrollSynth s (x,_) y = return y
 
-setSynth :: Point -> Synth -> Synth
+setSynth :: Point -> Synth -> STM Synth
 setSynth (x,y) e@(Pattern n q) 
 	| x >=0 && x < 1 && y >= 0 && y < 1 = let m = floor $ x * fromIntegral n
-			in Pattern n $ at m  .~ Just (realToFrac y) $ q
-	| otherwise = e
+			in return . Pattern n $ at m  .~ Just (realToFrac y) $ q
+	| otherwise = return e
 setSynth (x,y) e@(Projection n q) 
 	| x >=0 && x < 1 && y >= 0 && y < 1 = let m = floor $ x * fromIntegral n
-			in Projection n $ at m  .~ Just (realToFrac y) $ q
-	| otherwise = e
-setSynth _ x = x
+			in return . Projection n $ at m  .~ Just (realToFrac y) $ q
+	| otherwise = return e
+setSynth _ x = return x
 
 
 graph :: Graph Synth
@@ -99,7 +100,7 @@ graph = Graph (M.fromList $
 	]) M.empty M.empty
        
 
-renderSynth :: Object Synth -> IO Synth
+renderSynth :: Object Synth -> IO ()
 renderSynth (view object -> Pattern n y)  = do
 			let 	d = 1 / fromIntegral n
 			polygonSmooth $= Enabled
@@ -136,7 +137,6 @@ renderSynth (view object -> Pattern n y)  = do
                                 vertex (Vertex2 1 0.1 :: Vertex2 GLfloat)
                                 vertex (Vertex2 1 0.9 :: Vertex2 GLfloat)
                                 vertex (Vertex2 0 0.9 :: Vertex2 GLfloat)
-                        return $ Pattern n y 
 renderSynth (view object -> Projection n y)  = do
 			let 	d = 1 / fromIntegral n
 			polygonSmooth $= Enabled
@@ -172,7 +172,6 @@ renderSynth (view object -> Projection n y)  = do
                                 vertex (Vertex2 1 0.1 :: Vertex2 GLfloat)
                                 vertex (Vertex2 1 0.9 :: Vertex2 GLfloat)
                                 vertex (Vertex2 0 0.9 :: Vertex2 GLfloat)
-			return $ Projection n y
 renderSynth (view object -> Synth n)  = do
 			polygonSmooth $= Enabled
 			lineSmooth $= Enabled
@@ -195,7 +194,6 @@ renderSynth (view object -> Synth n)  = do
                                 vertex (Vertex2 1 0.1 :: Vertex2 GLfloat)
                                 vertex (Vertex2 1 0.9 :: Vertex2 GLfloat)
                                 vertex (Vertex2 0 0.9 :: Vertex2 GLfloat)
-                        return $ Synth n
 renderSynth (view object -> Bus n)  = do
 			polygonSmooth $= Enabled
 			lineSmooth $= Enabled
@@ -219,7 +217,6 @@ renderSynth (view object -> Bus n)  = do
                                 vertex (Vertex2 1 0.1 :: Vertex2 GLfloat)
                                 vertex (Vertex2 1 0.9 :: Vertex2 GLfloat)
                                 vertex (Vertex2 0 0.9 :: Vertex2 GLfloat)
-                        return $ Bus n
 			{-
 			let	h = 1/(fromIntegral $ length ps + 1) 
 			 	pn n = (p  + n) / (n+1)
@@ -266,7 +263,7 @@ main = do
                    windowTitle := "tracks widget" ]
   hb <- hBoxNew False 1
 
-  ref <- newTVarIO  graph 
+  ref <- newTVarIO $ insert graph empty
 
   connects <- graphing setSynth scrollSynth renderSynth ref 
   set window [containerChild := connects] 
