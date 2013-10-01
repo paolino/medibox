@@ -89,6 +89,9 @@ project sc (Projection da o prw sh qm ci) = let
 
 
 
+data Scored :: Nat -> * where
+	Base :: Pattern -> Scored Zero
+	Projected :: Scored Zero -> Projection -> Scored (Succ Zero)
 
 
 
