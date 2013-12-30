@@ -14,7 +14,7 @@ import Data.Function (on)
 
 floatMod x y = let
         r = x/y
-        in x - fromIntegral (floor r) * y
+        in x - fromIntegral (floor x/y) * y
 
 every = flip map
 
