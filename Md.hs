@@ -148,11 +148,12 @@ renderA t ms = mapM_ (\(m,x) -> forkIO . render t m $ x) . zip ms
 
 
 main = do
+
 	rem <- readFile "1.md"
+	n <- newTVarIO (read rem)
 	(t1,t2,tn,k) <- midiInOut "paolino"
 	-- n <- newTVarIO (M.fromList . zip [0..127] . repeat $ M.fromList . zip [0..7] . repeat $ M.fromList . map (\i -> (i,Nota 0 0 0 0)) $ [0..127])
-	n <- newTVarIO (read rem)
-	trit <- newTVarIO (M.fromList . zip [0..127] . repeat $ 0)
+	trit <- newTVarIO (M.fromList . zip [0..7] . repeat $ 0)
 	tbank <- newTVarIO 0
 	tedit <- newTVarIO 0
 	tsound <- newTVarIO 0
@@ -203,7 +204,6 @@ main = do
 						b <- (flip (M.!) bank) `fmap` readTVar n 
 						forM_ [0..7] $ \p -> modifyTVar n . flip M.adjust v_ . flip M.adjust p . flip M.adjust c_ $ \_ -> 
 							b M.! p M.! c_
-						writeTVar tbank v_
 				-- set loop length
 				121 -> atomically $ do 
 						writeTVar tloop v_
