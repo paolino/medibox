@@ -163,7 +163,7 @@ renderA t ms = mapM_ (\(m,x) -> forkIO . render t m $ x) . zip ms
 
 main = do
 	rem <- decodeFile "1.mde"
-	n <- deepseq rem `fmap` newTVarIO rem
+	n <- newTVarIO rem
 	(t1,t2,tn,k) <- midiInOut "paolino"
 	-- n <- newTVarIO (M.fromList . zip [0..127] . repeat $ M.fromList . zip [0..7] . repeat $ M.fromList . map (\i -> (i,Nota 0 0 0 0 1)) $ [0..127])
 	
@@ -200,20 +200,11 @@ main = do
 						writeTVar tsound v_
 					 	mb <- readTVar tedit
 						c_ <- readTVar tsound
-<<<<<<< HEAD
-						b <- (flip (M.!) bank) `fmap` readTVar n 
-						forM_ [0..7] $ \p -> modifyTVar n . flip M.adjust v_ . flip M.adjust p . flip M.adjust c_ $ \_ -> 
-							b M.! p M.! c_
-				-- set loop length
-				121 -> atomically $ do 
-						writeTVar tloop v_
-=======
 						case mb of 
 							[] -> return ()
 							(bank:_) -> do
 								z <- readTVar n	
 								mapM_ (writeTChan t2) [(0,j*8 + i,sel j $ (((z M.! bank) M.! i) M.! c_)) | j <- [0..4] , i <- [0..7]]
->>>>>>> eb8a728ea12f3e8280c81252503c725df375d37a
 				-- change value
 				_ -> if p_ `elem` [110 .. 117] then let p = p_ - 110 in 
 					case v_ of 
