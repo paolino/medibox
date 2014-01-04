@@ -1,5 +1,5 @@
 {-# LANGUAGE ScopedTypeVariables #-}
-module GUI where
+-- module GUI where
 
 import Graphics.UI.Gtk
 import Control.Monad.Trans
@@ -18,8 +18,9 @@ import MidiComm
                 
 midichannel = 0
 k = 1/128
-gui :: IO ()
-gui = do
+
+main :: IO ()
+main = do
   (midiinchan, midioutchan, _) <- midiInOut "midi control GUI" midichannel 
   thandle <- newTVarIO Nothing
 
@@ -108,6 +109,7 @@ gui = do
           forkIO . forever $ do
                          
                         (tp,wx) <- atomically $ readTChan dupchan
+			print (tp,wx)
                         case tp == paramv of 
                                 False -> return ()
                                 True ->  postGUISync $ do 
