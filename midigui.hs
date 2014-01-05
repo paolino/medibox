@@ -8,7 +8,7 @@ import Control.Monad
 import qualified Data.IntMap as M
 import Control.Concurrent
 import System.IO
-
+import Data.IORef
 
 import Sound.OSC
 
@@ -17,7 +17,7 @@ import MidiComm
 
                 
 midichannel = 0
-k = 1/128
+k = 1/127
 
 main :: IO ()
 main = do
@@ -28,16 +28,13 @@ main = do
   initGUI
   window <- windowNew
 
-   
-  ad <- adjustmentNew 0 0 400 1 10 400
-  sw <- scrolledWindowNew Nothing (Just ad)
+  -- main box   
+  mainbox    <- vBoxNew False 1
   set window [windowDefaultWidth := 200, windowDefaultHeight := 200,
-                          containerBorderWidth := 10, containerChild := sw]
-
-  vbox    <- vBoxNew True 1
-  scrolledWindowAddWithViewport sw vbox
+                          containerBorderWidth := 10, containerChild := mainbox]
+  -- main buttons
   coms <- hBoxNew False 1
-  boxPackStart vbox coms PackNatural 0
+  boxPackStart mainbox coms PackNatural 0
   res <- buttonNewWithLabel "Sync"
   boxPackStart coms res PackNatural 0
   load <- buttonNewFromStock "Load"
@@ -48,7 +45,8 @@ main = do
   boxPackStart coms save PackNatural 0
   quit <- buttonNewFromStock "Quit"
   boxPackStart coms quit PackNatural 0
-   
+
+  -- main buttons actions
   quit `on` buttonActivated $ mainQuit
   save `on` buttonActivated $ do
         mname <- fileChooserGetFilename fc
@@ -64,31 +62,72 @@ main = do
                 Just name -> do
                         h <- openFile name ReadMode 
                         atomically $ writeTVar thandle (Just h)
-  forM_ [0..127] $ \paramv -> do 
-          hbox    <- hBoxNew False 1
-          widgetSetSizeRequest hbox 600 12
-          boxPackStart vbox hbox PackGrow 0
+ 
+  -- knobs
+  -- ad <- adjustmentNew 0 0 400 1 10 400
+  -- sw <- scrolledWindowNew Nothing (Just ad)
+  fillnobbox <- hBoxNew False 1
+  boxPackStart mainbox fillnobbox PackNatural 0
+  knoblines <- vBoxNew False 1
+  boxPackStart fillnobbox knoblines PackNatural 0
+   
+  forM_ [0..3] $ \paramv' -> do
+     knobboxspace    <- hBoxNew True 1
+     widgetSetSizeRequest knobboxspace (-1) 10
+     boxPackStart knoblines knobboxspace PackNatural 0
+     knobbox    <- hBoxNew True 1
+     boxPackStart knoblines knobbox PackNatural 0
+     forM_ [0..31] $ \paramv'' -> do
+          let paramv= paramv' *32 + paramv''
+          when (paramv `mod` 8 == 0) $ do
+                  hbox    <- vBoxNew False 1
+                  boxPackStart knobbox hbox PackNatural 0
+                 
+          hbox    <- vBoxNew False 1
+          widgetSetSizeRequest hbox (-1) 165
+          boxPackStart knobbox hbox PackNatural 0
 
           param <- labelNew (Just $ show paramv)
-          widgetSetSizeRequest param 40 10
+          widgetSetSizeRequest param 30 15
           frame <- frameNew
           set frame [containerChild:= param]
           boxPackStart hbox frame PackNatural 0
 
           label <- labelNew (Just "0")
-          widgetSetSizeRequest label 40 10
+          widgetSetSizeRequest label 30 15
           frame <- frameNew
           set frame [containerChild:= label]
           boxPackStart hbox frame PackNatural 0
 
           eb <- eventBoxNew
+          memory <- labelNew (Just $ show (0,0))
           level <- progressBarNew 
+          progressBarSetOrientation level ProgressBottomToTop
           set eb [containerChild:= level]
-          
           widgetAddEvents eb [Button1MotionMask]
           boxPackStart hbox eb PackGrow 0
           progressBarSetFraction level 0
-          memory <- labelNew (Just $ show (0,0))
+         
+          exvalue <- newIORef 0
+          mute <- toggleButtonNewWithLabel "m" 
+          widgetSetSizeRequest mute 30 16
+          frame <- frameNew
+          set frame [containerChild:= mute]
+          boxPackStart hbox frame PackNatural 0
+          mute `on` toggled $ do
+                        a <- toggleButtonGetActive mute
+                        if a then do 
+                                x <- progressBarGetFraction level 
+                                writeIORef exvalue x
+                                progressBarSetFraction level 0
+                                atomically $ writeTChan midioutchan (paramv,0)
+                        else do 
+                                x <- readIORef exvalue
+                                progressBarSetFraction level x
+                                atomically $ writeTChan midioutchan (paramv,floor $ x/k)
+                 
+
+
           save `on` buttonActivated $ do
                         x <- progressBarGetFraction level 
                         mh <- atomically $ readTVar thandle
@@ -109,7 +148,6 @@ main = do
           forkIO . forever $ do
                          
                         (tp,wx) <- atomically $ readTChan dupchan
-			print (tp,wx)
                         case tp == paramv of 
                                 False -> return ()
                                 True ->  postGUISync $ do 
@@ -125,15 +163,15 @@ main = do
                         x <- progressBarGetFraction level 
                         atomically $ writeTChan midioutchan (paramv,floor $ x/k)
           on eb motionNotifyEvent $ do 
-                (r,_) <- eventCoordinates
-                (r',0) <- liftIO $ fmap read $ labelGetText memory
+                (_,r) <- eventCoordinates
+                (0,r') <- liftIO $ fmap read $ labelGetText memory
                 liftIO $ do 
                         x <- progressBarGetFraction level 
-                        let y = (if r > r' then limitedAdd 1 else limitedSubtract 0) k x
+                        let y = (if r < r' then limitedAdd 1 else limitedSubtract 0) k x
                         progressBarSetFraction level y
                         atomically $ writeTChan midioutchan (paramv,floor $ y/k)
                         labelSetText label $ show (floor $ y/k)
-                        labelSetText memory $ show (r,0)
+                        labelSetText memory $ show (0,r)
                 return True
           on level scrollEvent $  tryEvent $ do 
                 ScrollUp <- eventScrollDirection

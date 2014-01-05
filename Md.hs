@@ -198,7 +198,7 @@ main = do
 		[] -> "last.mde" 
 		(x:_) -> x ++ ".mde"
 	rem <- decodeFile file :: IO (M.Map Int Track)
-	n <- deepseq rem `fmap` newTVarIO rem
+	n <- deepseq () `fmap` newTVarIO rem
 	(t1,t2,tn,k) <- midiInOut "paolino"
 	-- n <- newTVarIO (M.fromList . zip [0..7] . repeat . Track 0 . M.fromList . zip [0..7] . repeat . M.fromList . zip [0..7] . repeat . M.fromList . zip [0..7] $ repeat (Nota 0 0 0 0 1 1) :: M.Map Int Track) 
 	atomically (modifyTVar n $ M.adjust (\(Track v o) -> Track 127 o) 0)
@@ -262,9 +262,9 @@ main = do
 							mapM_ (writeTChan t2) [(0,j*8 + i,sel j $ (((z M.! bank) M.! i) M.! c_)) | j <- [0..5] , i <- [0..7]]
 
 				-- change value
-				_ -> 	if p_ `elem` [102 .. 109] then let p = p_ - 102 in
+				_ -> 	if p_ `elem` [104 .. 111] then let p = p_ - 104 in
 						atomically $ modifyTVar tvolumes $ flip M.adjust p $ const v_
-				    	else if p_ `elem` [110 .. 117] then let p = p_ - 110 in 
+				    	else if p_ `elem` [96 .. 103] then let p = p_ - 96 in 
 						case v_ of 
 							0 -> atomically $ do 
 								modifyTVar tedit $ delete p
@@ -277,7 +277,7 @@ main = do
 										z <- octus `fmap` flip (M.!) t `fmap` readTVar n	
 										mapM_ (writeTChan t2) [(0,j*8 + i,sel j $ (((z M.! bank) M.! i) M.! c_)) | j <- [0..5] , i <- [0..7]]
 							_ -> atomically $ do 
-								modifyTVar tedit $ (p :)
+								modifyTVar tedit $ (p :) . filter (/= p)
 								c_ <- readTVar tsound
 								t <- readTVar ttrack
 								z <- octus `fmap` flip (M.!) t `fmap` readTVar n	
