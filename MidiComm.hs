@@ -11,13 +11,31 @@ import Sound.ALSA.Sequencer.Event
 import Sound.ALSA.Sequencer.Connect
 import Sound.ALSA.Sequencer 
 import Sound.ALSA.Exception  
-
+import System.Time.Monotonic
 
 
 import Control.Concurrent
 import Control.Concurrent.STM
 import Control.Monad
 
+midiOutNote :: String  -- ^ client name
+        -> TChan (Int,Int,Int,Bool)  -- ^ event channel
+        -> IO ()
+midiOutNote name ech = (`catch` \e -> putStrLn $ "midi_exception: " ++ show e) $ do
+  cl <- newClock
+  tn <- newTVarIO 0
+  withDefault Block $ \h -> do
+        setName (h :: Sound.ALSA.Sequencer.T OutputMode) $ name ++ "note out"
+        c <- getId h
+        withSimple h "midi out" (caps [capRead, capSubsRead]) typeMidiGeneric $ \p -> forever $ do
+                (cha,pitch,strength,no) <- atomically $ readTChan ech
+                let ev =  forConnection (toSubscribers (Sound.ALSA.Sequencer.Address.Cons c p)) $ 
+                                NoteEv (if no then NoteOn else NoteOff) (simpleNote
+                                        (Channel $ fromIntegral cha) 
+                                        (Pitch $ fromIntegral pitch) 
+                                        (Velocity $ fromIntegral strength)
+                                        )
+                void $ outputDirect h $ ev
 
 -- | Loop-accept control midi message on a specific channel
 midiIn  :: String  -- ^ client name
@@ -26,7 +44,7 @@ midiIn  :: String  -- ^ client name
         -> IO ()
 midiIn name recha incha = (`catch` \e -> putStrLn $ "midi_exception: " ++ show e)  $ do
   withDefault Block $ \h -> do
-        setName (h :: Sound.ALSA.Sequencer.T InputMode) name
+        setName (h :: Sound.ALSA.Sequencer.T InputMode) $ name ++ "ctrl in"
         c <- getId h
         withSimple h "midi in" (caps [capWrite, capSubsWrite]) typeMidiGeneric $ \p -> forever $ do
                 ev <-  input h
@@ -45,7 +63,7 @@ midiOut :: String  -- ^ client name
         -> IO ()
 midiOut name recha ech = (`catch` \e -> putStrLn $ "midi_exception: " ++ show e) $ do
   withDefault Block $ \h -> do
-        setName (h :: Sound.ALSA.Sequencer.T OutputMode) name
+        setName (h :: Sound.ALSA.Sequencer.T OutputMode) $ name ++ "ctrl out"
         c <- getId h
         withSimple h "midi out" (caps [capRead, capSubsRead]) typeMidiGeneric $ \p -> forever $ do
                 (par,val) <- atomically $ readTChan ech
