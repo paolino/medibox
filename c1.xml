@@ -1,0 +1,74 @@
+<!DOCTYPE patchbay>
+<patchbay version="0.3.10" name="c1">
+ <output-sockets>
+  <socket exclusive="off" client="system" type="jack-audio" name="system">
+   <plug>capture_1</plug>
+   <plug>capture_2</plug>
+  </socket>
+  <socket exclusive="off" client="zynaddsubfx" type="jack-audio" name="zynaddsubfx">
+   <plug>out_1</plug>
+   <plug>out_2</plug>
+  </socket>
+  <socket exclusive="off" client="Midi Through" type="alsa-midi" name="Midi Through">
+   <plug>Midi Through Port-0</plug>
+  </socket>
+  <socket exclusive="off" client="BCR[0-9]+" type="alsa-midi" name="BCR2000">
+   <plug>BCR[0-9]+ MIDI 1</plug>
+   <plug>BCR[0-9]+ MIDI 2</plug>
+  </socket>
+  <socket exclusive="off" client="midi control GUI" type="alsa-midi" name="midi control GUI">
+   <plug>midi out</plug>
+  </socket>
+  <socket exclusive="off" client="Hydrogen" type="jack-audio" name="Uscita Socket 7">
+   <plug>out_L</plug>
+   <plug>out_R</plug>
+  </socket>
+  <socket exclusive="off" client="sins_outnote out" type="alsa-midi" name="player">
+   <plug>midi out</plug>
+  </socket>
+ </output-sockets>
+ <input-sockets>
+  <socket exclusive="off" client="system" type="jack-audio" name="system">
+   <plug>playback_1</plug>
+   <plug>playback_2</plug>
+  </socket>
+  <socket exclusive="off" client="Hydrogen" type="alsa-midi" name="Entrata Socket 8">
+   <plug>Hydrogen Midi-In</plug>
+  </socket>
+  <socket exclusive="off" client="Midi Through" type="alsa-midi" name="Midi Through">
+   <plug>Midi Through Port-0</plug>
+  </socket>
+  <socket exclusive="off" client="BCR[0-9]+" type="alsa-midi" name="BCR2000">
+   <plug>BCR[0-9]+ MIDI 1</plug>
+   <plug>BCR[0-9]+ MIDI 2</plug>
+   <plug>BCR[0-9]+ MIDI 3</plug>
+  </socket>
+  <socket exclusive="off" client="midi control GUI" type="alsa-midi" name="midi control GUI">
+   <plug>midi in</plug>
+  </socket>
+  <socket exclusive="off" client="ZynAddSubFX" type="alsa-midi" name="ZynAddSubFX">
+   <plug>ZynAddSubFX</plug>
+  </socket>
+  <socket exclusive="off" client="sins_inctrl in" type="alsa-midi" name="player">
+   <plug>midi in</plug>
+  </socket>
+  <socket exclusive="off" client="sins_graphctrl in" type="alsa-midi" name="sins viewer">
+   <plug>midi in</plug>
+  </socket>
+  <socket exclusive="off" client="aseqdump" type="alsa-midi" name="aseqdump">
+   <plug>aseqdump</plug>
+  </socket>
+ </input-sockets>
+ <slots/>
+ <cables>
+  <cable output="zynaddsubfx" input="system" type="jack-audio"/>
+  <cable output="BCR2000" input="midi control GUI" type="alsa-midi"/>
+  <cable output="midi control GUI" input="BCR2000" type="alsa-midi"/>
+  <cable output="midi control GUI" input="player" type="alsa-midi"/>
+  <cable output="midi control GUI" input="sins viewer" type="alsa-midi"/>
+  <cable output="Uscita Socket 7" input="system" type="jack-audio"/>
+  <cable output="player" input="Entrata Socket 8" type="alsa-midi"/>
+  <cable output="player" input="ZynAddSubFX" type="alsa-midi"/>
+ </cables>
+</patchbay>
+
