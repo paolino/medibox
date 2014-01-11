@@ -46,6 +46,7 @@ select 2 = _3
 main :: IO ()
 main = do
   tw <- newTVarIO (M.fromList . zip [0..3] . repeat . M.fromList . zip [0..7] $ repeat (0::GLfloat,0,0))
+  tl <- newTVarIO 0
   tc <- newTChanIO
   forkIO $ midiIn "sins_graph" 0 tc
   forkIO . forever $ do 
@@ -53,7 +54,9 @@ main = do
 		when (n<96) $ 
 			atomically . modifyTVar tw . flip M.adjust (n `div` 24) . flip M.adjust (n `mod` 8) $  select (n `mod` 24 `div` 8) .~ fromIntegral s
   
-		
+		case n of 
+			125 -> atomically $ writeTVar tl $ fromIntegral s/128
+			_ -> return ()
   initGUI
   
 
@@ -96,7 +99,8 @@ main = do
     withGLDrawingArea canvas $ \glwindow -> do
       clear [DepthBuffer, ColorBuffer]
       w <- atomically $ readTVar tw
-      draw w
+      l <- atomically $ readTVar tl
+      draw w l
       glDrawableSwapBuffers glwindow
     return True
   
@@ -118,22 +122,17 @@ main = do
 
 color4f r g b a = color $ Color4 r g (b :: GLfloat) a
 vertex2f x y = vertex $ Vertex2 x (y :: GLfloat)
-draw ws = do
+draw ws l = do
   matrixMode $= Modelview 0
   loadIdentity
-  let   x=0.1
-	y=0.1
-        h=0.8		
   renderPrimitive LineStrip $ do
 		color4f 0 0 0 1
-                forM_ [0,0.001 .. 1] $ \x -> vertex2f x ((/4) $ sum  $ map (^2) [a/16*sin (s/128*2*pi + x*2*pi*w)/10 | (w,s,a) <- M.elems (ws M.! 0)])
+                forM_ [0,0.001 .. 1] $ \x -> vertex2f x (  sum . map (^4) $ [a/16*sin (s/128*2*pi + x*2*pi*w)/10 | (w,s,a) <- M.elems (ws M.! 0)])
+  forM_ [0..63]	$ \x ->  renderPrimitive LineStrip $ do
+		color4f 0.5 0.6 0.7 1
+		vertex2f (x/64) 0
+		vertex2f (x/64) 1
   renderPrimitive LineStrip $ do
-                forM_ [0,0.001 .. 1] $ \x -> vertex2f x ((0.25 +) . (/4)  $ sum $ map (^2) [a/16*sin (s/128*2*pi + x*2*pi*w)/10 | (w,s,a) <- M.elems (ws M.! 1)])
-  renderPrimitive LineStrip $ do
-                forM_ [0,0.001 .. 1] $ \x -> vertex2f x ((0.50 +) . (/4) $ sum  $ map (^2) [a/16*sin (s/128*2*pi + x*2*pi*w)/10 | (w,s,a) <- M.elems (ws M.! 2)])
-  
-  renderPrimitive LineStrip $ do
-                forM_ [0,0.001 .. 1] $ \x -> vertex2f x ((0.75 +) . (/4) $ sum  $ map (^2) [a/16*sin (s/128*2*pi + x*2*pi*w)/10 | (w,s,a) <- M.elems (ws M.! 3)])
-  renderPrimitive Lines $ forM_ [0..7] $ \x -> do 
-		vertex2f (x/8) 0
-		vertex2f (x/8) 1
+		color4f 0.3 0.6 0.3 1
+		vertex2f 0 l
+		vertex2f 1 l

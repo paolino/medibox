@@ -55,7 +55,24 @@ midiIn name recha incha = (`catch` \e -> putStrLn $ "midi_exception: " ++ show e
                                         (Value (fromIntegral -> val))
                                         ) -> when  (cha == recha) $ atomically $ writeTChan incha (par,val)
                      _ -> return ()           
-                
+-- | Loop-accept control midi message on a specific channel
+midiPCIn  :: String  -- ^ client name
+        -> Int     -- ^ listening midi channel
+        -> TChan (Int,Int)  -- ^ event channel
+        -> IO ()
+midiPCIn name recha incha = (`catch` \e -> putStrLn $ "midi_exception: " ++ show e)  $ do
+  withDefault Block $ \h -> do
+        setName (h :: Sound.ALSA.Sequencer.T InputMode) $ name ++ "ctrl in"
+        c <- getId h
+        withSimple h "midi in" (caps [capWrite, capSubsWrite]) typeMidiGeneric $ \p -> forever $ do
+                ev <-  input h
+                case body ev of
+                     CtrlEv PgmChange (Ctrl 
+                                        (Channel (fromIntegral -> cha)) 
+                                        (Parameter (fromIntegral -> par)) 
+                                        (Value (fromIntegral -> val))
+                                        ) -> when  (cha == recha) $ atomically $ writeTChan incha (par,val)
+                     _ -> return ()                  
 -- | Loop-broadcast control midi message on a specific channel
 midiOut :: String  -- ^ client name
         -> Int     -- ^ broadcast midi channel

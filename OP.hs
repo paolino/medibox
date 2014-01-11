@@ -1,25 +1,19 @@
-{-# LANGUAGE ViewPatterns #-}
+{-# LANGUAGE ViewPatterns, TemplateHaskell #-}
 module Main (main) where
 
-import Data.IORef
+import Data.Binary
 
-import Graphics.UI.Gtk as Gtk
-import Graphics.Rendering.Cairo
-import Graphics.UI.Gtk.Cairo
-import Graphics.UI.Gtk.Gdk.GC
-import Graphics.UI.Gtk (AttrOp((:=)))
-import Graphics.UI.Gtk.OpenGL as GtkGL
 import Control.Monad
-import System.Random
 import Control.Concurrent.STM
 import Control.Concurrent
-import Control.Monad.Trans
 import Sound.OSC
-import Graphics.Rendering.OpenGL as GL
 
+import Control.Arrow
 import Control.Lens ((^.), at, traverse, (%~), _3,_4,(.~),_1,_2)
+import Control.Lens.TH
 import MidiComm
 import qualified Data.Map as M
+import SC
 
 
 collapse 0 = 0
@@ -35,6 +29,36 @@ collapse 9 = 7
 collapse 10 = 12
 collapse 11 = 12
 
+
+data Wave = Wave {
+	_offset :: Double,
+	_amp :: Double,
+	_quant :: Int,
+	_power :: Int,
+	_cut :: Double,
+	_comps :: M.Map Int (Double,Double,Double)
+	}
+
+$(makeLenses ''Wave)
+
+instance Binary Wave where
+	put (Wave o a q p cu co) = put o >> put a >> put q >> put p >> put cu >> put co
+	get = do 
+		o <- get
+		a <- get
+		q <- get
+		p <- get
+		cu <- get
+		co <- get
+		return (Wave o a q p cu co)
+
+quant' x ((y',y''):rs) 
+	  | x <= y' && x - y' > y'' - x  = y''
+	  | x <= y'  = y'
+	  | otherwise = quant' x  rs
+
+quantize k x = quant' x $ zip `ap` tail $ [0,k..]
+
 modcollapse x = let
 	(o,n) = x `divMod` 12
 	in o * 12 + collapse n
@@ -43,41 +67,91 @@ select 0 = _1
 select 1 = _2
 select 2 = _3
 
+
+
 main :: IO ()
 main = do
-  tw <- newTVarIO (M.fromList . zip [0..3] . repeat . M.fromList . zip [0..7] $ repeat (0::GLfloat,0,0))
-  te <- newTVarIO (\_ -> 0)
+  w0 <- decodeFile "current.bb"
+  let w1 = (M.fromList . zip [0..7] . repeat . M.fromList . zip [0..3] . repeat . Wave 0 1 0 2 0 . M.fromList . zip [0..7] $ repeat (0::Double,0,0))
+  tw <- newTVarIO w0
+  tp <- newTVarIO 0
+  tl <- newTVarIO 0
   tc <- newTChanIO
-  tn <- newTChanIO
+  tfb <- newTChanIO 
+  forkIO $ midiOut "sins_out_fb" 0 tfb
   forkIO $ midiIn "sins_in" 0 tc
-  forkIO $ midiOutNote "sins_out" tn
-  forkIO . forever $ do 
-		(n,s) <- atomically (readTChan tc) 
-		when (n<96) $ 
-			atomically . modifyTVar tw . flip M.adjust (n `div` 24) . flip M.adjust (n `mod` 8) $  select (n `mod` 24 `div` 8) .~ fromIntegral s
-  
-  let lo i = do
-  	dp <- newTVarIO (0,0,0,0)
-	forkIO $ do 
-		threadDelay $ 120 * 1000
-		forkIO $ lo $ i + 1
-		(c,p,s,d) <- atomically $ readTVar dp
-		threadDelay $ floor $ fromIntegral (floor c) / 8  * 120 * 1000
-		atomically $ writeTChan tn (0,modcollapse $ floor p,floor s,True)
-		threadDelay $ floor $ fromIntegral (floor d) / 8 * 120 * 1000
-		atomically $ writeTChan tn (0,modcollapse $ floor p,0,False)
-		
-	let x = fromIntegral i  * pi * 2 / 64 
-	atomically $ do 
-		ws <- readTVar tw
-		let c = (128 *)  $ sum $ map (^2) [a/16*sin (s/128*2*pi + x*w)/10 | (w,s,a) <- M.elems (ws M.! 3)]
-		let p = (128 *)  $ sum $ map (^2) [a/16*sin (s/128*2*pi + x*w)/10 | (w,s,a) <- M.elems (ws M.! 0)]
-		let s = (128 *)  $ sum  $ map (^2) [a/16*sin (s/128*2*pi + x*w)/10 | (w,s,a) <- M.elems (ws M.! 1)]
-		let d =(128 *) $ sum $ map (^2) [a/16*sin (s/128*2*pi + x*w)/10 | (w,s,a) <- M.elems (ws M.! 2)]
-		c `seq` d `seq` p `seq` s `seq` writeTVar dp (c,p,s,d)
+  forkIO . forever . atomically $ do 
+		(n',s) <- readTChan tc
+		k <- readTVar tp
+		l <- readTVar tl
+		let n = n' + l * 24
+		when (n<96) $ do
+			modifyTVar tw . flip M.adjust k . flip M.adjust (n `div` 24) . (comps %~) . flip M.adjust (n `mod` 8) $  select (n `mod` 24 `div` 8) .~ fromIntegral s
+		case n' of
+			125 ->	do	k <- readTVar tp
+					l <- readTVar tl
+					modifyTVar tw . flip M.adjust k . flip M.adjust l $ cut .~ (fromIntegral s/128)
 
-  
-  lo 0 
+			124 ->	do	k <- readTVar tp
+					l <- readTVar tl
+					modifyTVar tw . flip M.adjust k . flip M.adjust l $ quant .~ s
+			123 ->	do	k <- readTVar tp
+					l <- readTVar tl
+					modifyTVar tw . flip M.adjust k . flip M.adjust l $ amp .~ (fromIntegral s/128)
+			122 ->	do	k <- readTVar tp
+					l <- readTVar tl
+					modifyTVar tw . flip M.adjust k . flip M.adjust l $ offset .~ (fromIntegral s/128)
+			121 ->	do	k <- readTVar tp
+					l <- readTVar tl
+					modifyTVar tw . flip M.adjust k . flip M.adjust l $ power .~ s
+
+			127 -> when (s < 8) $ do 
+				writeTVar tp s
+				w <- flip (M.!) s `fmap` readTVar tw
+				l <- readTVar tl
+				let g = l * 24
+				forM_ [g .. g + 23]  $ \n -> writeTChan  tfb $ (n - g,floor $ (flip (^.) comps (w M.! (n `div` 24)) M.! (n `mod` 8)) ^. select (n `mod` 24 `div` 8))
+				writeTChan tfb (125,floor $ flip (^.) cut (w M.! l) * 127)
+				writeTChan tfb (124, flip (^.) quant (w M.! l))
+				writeTChan tfb (123,floor $ flip (^.) amp (w M.! l) * 127)
+				writeTChan tfb (122,floor $ flip (^.) offset (w M.! l) * 127)
+				writeTChan tfb (121, flip (^.) power (w M.! l))
+			126 -> when (s < 4) $ do
+				writeTVar tl s
+				p <- readTVar tp
+				w <- flip (M.!) p `fmap` readTVar tw
+				let g = s * 24
+				forM_ [g .. g + 23]  $ \n -> writeTChan  tfb $ (n - g,floor $ (flip (^.) comps (w M.! (n `div` 24)) M.! (n `mod` 8)) ^. select (n `mod` 24 `div` 8))
+				writeTChan tfb (125,floor $ flip (^.) cut (w M.! s) * 127)
+				writeTChan tfb (124, flip (^.) quant (w M.! s))
+				writeTChan tfb (123,floor $ flip (^.) amp (w M.! s) * 127)
+				writeTChan tfb (122,floor $ flip (^.) offset (w M.! s) * 127)
+				writeTChan tfb (121, flip (^.) power (w M.! s))
+			_ -> return ()
+
+  let ao l p 
+	| p >= l = p
+	| otherwise = 0
+  (s ,q) <- noteOut "/home/paolino/WAV/ByKit/Mighty_Carpet/Prova/"
+  let cyc (Sequencer f) i =  do 
+		es <- forM [0..4] $ \k -> do
+			let x = fromIntegral i  * pi * 2 / 64 
+			(p,s,d,c) <- atomically $  do 
+				ws <- flip (M.!) k `fmap` readTVar tw
+				let [p,s,d,c] = flip map [0..3] $ \r -> 
+					let Wave o a q p l xs = ws M.! r
+					in clip  . quantize ((fromIntegral q + 1)/128) . (o +) . (a *) . ao l $ sum $ map (^p) [a/4*sin (s/128*2*pi + x*w)/10 | (w,s,a) <- M.elems xs]
+				return (p,s,d,c)
+			return $ (k,p,s,d,c)
+		s <- f es
+		cyc s (i + 1)
+		  
+  forkIO $ cyc s 0
   getLine
-  return ()
-		
+  ws <- atomically $ readTVar tw
+  encodeFile "current.bb" ws
+
+clip x | x > 1 = 1
+       | x < 0 = 0
+       | otherwise = x
+  		
