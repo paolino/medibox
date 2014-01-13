@@ -29,7 +29,6 @@ collapse 9 = 7
 collapse 10 = 12
 collapse 11 = 12
 
-
 data Wave = Wave {
 	_offset :: Double,
 	_amp :: Double,
@@ -51,6 +50,7 @@ instance Binary Wave where
 		cu <- get
 		co <- get
 		return (Wave o a q p cu co)
+freqs = [440 * (1.059463)^^x | x <- [-40..40]]
 
 quant' x ((y',y''):rs) 
 	  | x <= y' && x - y' > y'' - x  = y''
@@ -116,6 +116,7 @@ main = do
 				writeTChan tfb (123,floor $ flip (^.) amp (w M.! l) * 127)
 				writeTChan tfb (122,floor $ flip (^.) offset (w M.! l) * 127)
 				writeTChan tfb (121, flip (^.) power (w M.! l))
+				-- writeTChan tfb (120, flip (^.) width (w M.! l))
 			126 -> when (s < 4) $ do
 				writeTVar tl s
 				p <- readTVar tp
@@ -127,16 +128,18 @@ main = do
 				writeTChan tfb (123,floor $ flip (^.) amp (w M.! s) * 127)
 				writeTChan tfb (122,floor $ flip (^.) offset (w M.! s) * 127)
 				writeTChan tfb (121, flip (^.) power (w M.! s))
+				-- writeTChan tfb (120, flip (^.) width (w M.! s))
 			_ -> return ()
 
   let ao l p 
 	| p >= l = p
 	| otherwise = 0
-  (s ,q) <- noteOut "/home/paolino/WAV/ByKit/Mighty_Carpet/Prova/"
+  (s ,q) <- noteOut "Prova"
   let cyc (Sequencer f) i =  do 
-		es <- forM [0..4] $ \k -> do
+		es <- forM ([0..4] ++ [5,6,7]) $ \k -> do
 			let x = fromIntegral i  * pi * 2 / 64 
 			(p,s,d,c) <- atomically $  do 
+				let x = fromIntegral i  * pi * 2 / (2 ^ 6)
 				ws <- flip (M.!) k `fmap` readTVar tw
 				let [p,s,d,c] = flip map [0..3] $ \r -> 
 					let Wave o a q p l xs = ws M.! r

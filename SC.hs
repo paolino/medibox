@@ -5,6 +5,7 @@ module SC where
 import Control.Arrow ((&&&))
 import qualified Data.IntMap as IM
 import Control.Concurrent.STM
+import Control.Concurrent
 import Control.Monad (forM_,when)
 
 import Sound.OSC
@@ -12,14 +13,63 @@ import Sound.SC3 hiding (pitch)
 import System.FilePath
 import System.FilePath.Find
 import System.Directory
-
+import Control.Monad
 import Data.Maybe
+import System.Random
 
 
 withSC3n :: Int -> Connection UDP a -> IO a
 withSC3n i = withTransport (openUDP "127.0.0.1" $ fromIntegral i)
 
 servers = [57110]
+freqs = [440 * (1.059463)^^x | x <- [-40..400]]
+
+quantf x ((y',y''):rs) 
+	  | x <= y' && x - y' > y'' - x  = y''
+	  | x <= y'  = y'
+	  | otherwise = quantf x  rs
+
+quantizefreq x = quantf x $ zip `ap` tail $ freqs
+
+bootSin :: Int -> IO (Double -> Double -> Double -> Double ->  IO ())
+bootSin j =  do 
+	withSC3n j . send $ d_recv . synthdef "sin" . out 0 $ mce  [
+		(lag (control KR "amp" 0) (control KR "rel" 0)) * sinOsc AR (lag ( control KR "pitch" 0) (control KR "rel" 0)) 0 
+			* sinOsc AR (lag (control KR "pitch" 0) (control KR "rel" 0)) 0,
+		(lag (control KR "amp" 0) (control KR "rel" 0)) * sinOsc AR (lag (control KR "pitch" 0 + 3) (control KR "rel" 0)) 0.3 * sinOsc AR (lag (control KR "pitch" 0) (control KR "rel" 0)) 0
+		]
+		
+	withSC3n j . send $  s_new "sin" 1000 AddToTail 1 $ []
+	threadDelay 1000
+	return $  \t p a r -> withSC3n 57110 . sendBundle . bundle t . return $ 
+                         n_set 1000  [("amp",a),("pitch",quantizefreq $ p),("rel",r)]
+
+
+
+bootSinH :: Int -> IO (Double -> Double -> Double -> Double ->  IO ())
+bootSinH j =  do 
+	n <- randomIO :: IO Int
+	withSC3n j . send $ d_recv . synthdef ("sinh" ++ show n) . out 0 $ 
+		envGen KR 1 1 0 1 RemoveSynth (envPerc  0.001 (control KR "rel" 0.4)) *  (control KR "amp" 0.2) *mce  [
+		sinOsc AR (control KR "pitch" 250) 0,
+		sinOsc AR (control KR "pitch" 250 * 1.01) 0
+		]
+		
+	return $  \t p a r -> do
+			withSC3n 57110 . sendBundle . bundle t . return $ 
+                         s_new ("sinh" ++ show n) (-1) AddToTail 1 [("amp",a),("pitch",quantizefreq $ p),("rel",r)]
+bootSinHR :: Int -> IO (Double -> Double -> Double -> Double ->  IO ())
+bootSinHR j =  do 
+	n <- randomIO :: IO Int
+	withSC3n j . send $ d_recv . synthdef ("sinh" ++ show n) . out 0 $ 
+		envGen KR 1 1 0 1 RemoveSynth (envPerc  (control KR "rel" 0.4) 0.001) *  (control KR "amp" 0.2) *mce  [
+		sinOsc AR (control KR "pitch" 250) 0,
+		sinOsc AR (control KR "pitch" 250 * 1.05) 0
+		]
+		
+	return $  \t p a r -> do
+			withSC3n 57110 . sendBundle . bundle t . return $ 
+                         s_new ("sinh" ++ show n) (-1) AddToTail 1 [("amp",a),("pitch",quantizefreq $ p),("rel",r)]
 
 
 bootSample :: Int -> (Int,(FilePath,String)) -> IO ()
@@ -45,7 +95,16 @@ initSynths sampledir = do
                 l <- zip [0..] ls
                 return $ bootSample j l
 	mapM_ print ls
-	return $ (\i t a p r -> playSample t p a r . snd . fromJust . lookup i . zip [0..] $ ls, map fst . zip [0..] $ ls)
+	bass <- bootSin 57110
+	pluck <- bootSinH 57110
+	pluck2 <- bootSinHR 57110
+	pluck3 <- bootSinH 57110
+	let sel i t a p r 
+		| i == 7 = bass t (25 + p * 50) a r
+		| i == 6 = pluck t (25*8 + p * 50*8) a r
+		| i == 5 = pluck2 t (25*16 + p * 50*16) a r
+		| i < 7 = playSample t p a r . snd . fromJust . lookup i . zip [0..] $ ls
+	return $ (sel , map fst . zip [0..] $ ls)
 
 newtype Sequencer = Sequencer ([(Int,Double,Double,Double,Double)] -> IO Sequencer)
 

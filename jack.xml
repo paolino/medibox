@@ -1,21 +1,19 @@
 <!DOCTYPE patchbay>
-<patchbay version="0.3.10" name="jack">
+<patchbay version="0.3.11" name="jack">
  <output-sockets>
   <socket exclusive="off" client="system" type="jack-audio" name="system">
    <plug>capture_1</plug>
    <plug>capture_2</plug>
   </socket>
-  <socket exclusive="off" client="Hydrogen" type="jack-audio" name="Hydrogen">
-   <plug>out_L</plug>
-   <plug>out_R</plug>
-  </socket>
-  <socket exclusive="off" client="zynaddsubfx" type="jack-audio" name="zynaddsubfx">
+  <socket exclusive="off" client="SuperCollider" type="jack-audio" name="SuperCollider">
    <plug>out_1</plug>
    <plug>out_2</plug>
-  </socket>
-  <socket exclusive="off" client="drumkv1" type="jack-audio" name="drumkv1">
-   <plug>out_0</plug>
-   <plug>out_1</plug>
+   <plug>out_3</plug>
+   <plug>out_4</plug>
+   <plug>out_5</plug>
+   <plug>out_6</plug>
+   <plug>out_7</plug>
+   <plug>out_8</plug>
   </socket>
   <socket exclusive="off" client="Midi Through" type="alsa-midi" name="Midi Through">
    <plug>Midi Through Port-0</plug>
@@ -24,16 +22,7 @@
    <plug>BCR[0-9]+ MIDI 1</plug>
    <plug>BCR[0-9]+ MIDI 2</plug>
   </socket>
-  <socket exclusive="off" client="Hydrogen" type="alsa-midi" name="Hydrogen">
-   <plug>Hydrogen Midi-Out</plug>
-  </socket>
-  <socket exclusive="off" client="md feedback" type="alsa-midi" name="md feedback">
-   <plug>midi out</plug>
-  </socket>
-  <socket exclusive="off" client="md note out" type="alsa-midi" name="md note out">
-   <plug>midi note out</plug>
-  </socket>
-  <socket exclusive="off" client="midi control GUI" type="alsa-midi" name="midi control GUI">
+  <socket exclusive="off" client="sins_out_fbctrl out" type="alsa-midi" name="sins_out_fbctrl out">
    <plug>midi out</plug>
   </socket>
  </output-sockets>
@@ -41,13 +30,24 @@
   <socket exclusive="off" client="system" type="jack-audio" name="system">
    <plug>playback_1</plug>
    <plug>playback_2</plug>
+   <plug>playback_3</plug>
+   <plug>playback_4</plug>
+   <plug>playback_5</plug>
+   <plug>playback_6</plug>
   </socket>
-  <socket exclusive="off" client="drumkv1" type="jack-audio" name="drumkv1">
-   <plug>in_0</plug>
+  <socket exclusive="off" client="SuperCollider" type="jack-audio" name="SuperCollider">
    <plug>in_1</plug>
+   <plug>in_2</plug>
+   <plug>in_3</plug>
+   <plug>in_4</plug>
+   <plug>in_5</plug>
+   <plug>in_6</plug>
+   <plug>in_7</plug>
+   <plug>in_8</plug>
   </socket>
-  <socket exclusive="off" client="drumkv1" type="jack-midi" name="drumkv1">
-   <plug>in</plug>
+  <socket exclusive="off" client="art2dj" type="jack-audio" name="art2dj">
+   <plug>iL</plug>
+   <plug>iR</plug>
   </socket>
   <socket exclusive="off" client="Midi Through" type="alsa-midi" name="Midi Through">
    <plug>Midi Through Port-0</plug>
@@ -57,38 +57,16 @@
    <plug>BCR[0-9]+ MIDI 2</plug>
    <plug>BCR[0-9]+ MIDI 3</plug>
   </socket>
-  <socket exclusive="off" client="Hydrogen" type="alsa-midi" name="Hydrogen">
-   <plug>Hydrogen Midi-In</plug>
-  </socket>
-  <socket exclusive="off" client="ZynAddSubFX" type="alsa-midi" name="ZynAddSubFX">
-   <plug>ZynAddSubFX</plug>
-  </socket>
-  <socket exclusive="off" client="md ctrl in" type="alsa-midi" name="md ctrl in">
+  <socket exclusive="off" client="sins_inctrl in" type="alsa-midi" name="sins_inctrl in">
    <plug>midi in</plug>
-  </socket>
-  <socket exclusive="off" client="paolino" type="alsa-midi" name="paolino">
-   <plug>midi in</plug>
-  </socket>
-  <socket exclusive="off" client="midi control GUI" type="alsa-midi" name="midi control GUI">
-   <plug>midi in</plug>
-  </socket>
-  <socket exclusive="off" client="drumkv1" type="alsa-midi" name="drumkv1">
-   <plug>in</plug>
   </socket>
  </input-sockets>
  <slots/>
  <cables>
-  <cable output="Hydrogen" input="system" type="jack-audio"/>
-  <cable output="zynaddsubfx" input="system" type="jack-audio"/>
-  <cable output="drumkv1" input="system" type="jack-audio"/>
-  <cable output="BCR2000" input="midi control GUI" type="alsa-midi"/>
-  <cable output="BCR2000" input="md ctrl in" type="alsa-midi"/>
-  <cable output="md feedback" input="midi control GUI" type="alsa-midi"/>
-  <cable output="md feedback" input="BCR2000" type="alsa-midi"/>
-  <cable output="md note out" input="ZynAddSubFX" type="alsa-midi"/>
-  <cable output="md note out" input="Hydrogen" type="alsa-midi"/>
-  <cable output="md note out" input="drumkv1" type="alsa-midi"/>
-  <cable output="midi control GUI" input="md ctrl in" type="alsa-midi"/>
+  <cable output="SuperCollider" input="system" type="jack-audio"/>
+  <cable output="SuperCollider" input="art2dj" type="jack-audio"/>
+  <cable output="BCR2000" input="sins_inctrl in" type="alsa-midi"/>
+  <cable output="sins_out_fbctrl out" input="BCR2000" type="alsa-midi"/>
  </cables>
 </patchbay>
 
