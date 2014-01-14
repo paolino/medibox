@@ -63,7 +63,6 @@
  </input-sockets>
  <slots/>
  <cables>
-  <cable output="SuperCollider" input="system" type="jack-audio"/>
   <cable output="SuperCollider" input="art2dj" type="jack-audio"/>
   <cable output="BCR2000" input="sins_inctrl in" type="alsa-midi"/>
   <cable output="sins_out_fbctrl out" input="BCR2000" type="alsa-midi"/>

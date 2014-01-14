@@ -102,7 +102,7 @@ initSynths sampledir = do
 	let sel i t a p r 
 		| i == 7 = bass t (25 + p * 50) a r
 		| i == 6 = pluck t (25*8 + p * 50*8) a r
-		| i == 5 = pluck2 t (25*16 + p * 50*16) a r
+		| i == 5 = pluck t (25*16 + p * 50*16) a r
 		| i < 7 = playSample t p a r . snd . fromJust . lookup i . zip [0..] $ ls
 	return $ (sel , map fst . zip [0..] $ ls)
 
@@ -114,7 +114,7 @@ noteOut s = do
 	let g ts js  = do
 		t <- time
 		let 	(t':rs) = dropWhile (<=t) ts
-		forM_ js $ \(i,p,a,d,c) -> f i (t' + c  * 0.12 * 4) a p (d * 0.12 * 4) 
+		forM_ js $ \(i,p,a,d,c) -> f i (t' + c  * 0.12*128) a p (d * 0.12 * 4) 
 		t <- time
 		when (t' > t) $ pauseThreadUntil t'
 		return (Sequencer $ g rs)

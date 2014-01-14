@@ -67,10 +67,15 @@ select 0 = _1
 select 1 = _2
 select 2 = _3
 
-
+echo (k,0) = (k,"PITCH")
+echo (k,1) = (k,"AMP")
+echo (k,2) = (k,"RELEASE")
+echo (k,3) = (k,"DELAY")
 
 main :: IO ()
 main = do
+  techo <- newTChanIO
+  forkIO . forever $ atomically (readTChan techo) >>= print . echo
   w0 <- decodeFile "current.bb"
   let w1 = (M.fromList . zip [0..7] . repeat . M.fromList . zip [0..3] . repeat . Wave 0 1 0 2 0 . M.fromList . zip [0..7] $ repeat (0::Double,0,0))
   tw <- newTVarIO w0
@@ -130,7 +135,10 @@ main = do
 				writeTChan tfb (121, flip (^.) power (w M.! s))
 				-- writeTChan tfb (120, flip (^.) width (w M.! s))
 			_ -> return ()
-
+		
+		k <- readTVar tp
+		l <- readTVar tl
+		writeTChan techo (k,l)
   let ao l p 
 	| p >= l = p
 	| otherwise = 0
@@ -139,7 +147,7 @@ main = do
 		es <- forM ([0..4] ++ [5,6,7]) $ \k -> do
 			let x = fromIntegral i  * pi * 2 / 64 
 			(p,s,d,c) <- atomically $  do 
-				let x = fromIntegral i  * pi * 2 / (2 ^ 6)
+				let x = fromIntegral i  * pi * 2 / (2 ^ 8)
 				ws <- flip (M.!) k `fmap` readTVar tw
 				let [p,s,d,c] = flip map [0..3] $ \r -> 
 					let Wave o a q p l xs = ws M.! r
@@ -158,3 +166,10 @@ clip x | x > 1 = 1
        | x < 0 = 0
        | otherwise = x
   		
+tri f 0 _ = 0  -- bug
+tri f w t = let
+	d = 2 * pi / w
+	n =(t + f) / d
+	a = t - d * fromIntegral (floor n)
+	in (a * 2 / d) - 1
+	
