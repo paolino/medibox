@@ -16,18 +16,6 @@ import qualified Data.Map as M
 import SC
 
 
-collapse 0 = 0
-collapse 1 = 0
-collapse 2 = 2
-collapse 3 = 3
-collapse 4 = 3
-collapse 5 = 5
-collapse 6 = 7
-collapse 7 = 7
-collapse 8 = 8
-collapse 9 = 7
-collapse 10 = 12
-collapse 11 = 12
 
 data Wave = Wave {
 	_offset :: Double,
@@ -59,9 +47,6 @@ quant' x ((y',y''):rs)
 
 quantize k x = quant' x $ zip `ap` tail $ [0,k..]
 
-modcollapse x = let
-	(o,n) = x `divMod` 12
-	in o * 12 + collapse n
 
 select 0 = _1
 select 1 = _2
@@ -71,13 +56,14 @@ echo (k,0) = (k,"PITCH")
 echo (k,1) = (k,"AMP")
 echo (k,2) = (k,"RELEASE")
 echo (k,3) = (k,"DELAY")
+echo (k,4) = (k,"HARM")
 
 main :: IO ()
 main = do
   techo <- newTChanIO
   forkIO . forever $ atomically (readTChan techo) >>= print . echo
   w0 <- decodeFile "current.bb"
-  let w1 = (M.fromList . zip [0..7] . repeat . M.fromList . zip [0..3] . repeat . Wave 0 1 0 2 0 . M.fromList . zip [0..7] $ repeat (0::Double,0,0))
+  let w1 = (M.fromList . zip [0..7] . repeat . M.fromList . zip [0..4] . repeat . Wave 0 1 0 2 0 . M.fromList . zip [0..7] $ repeat (0::Double,0,0))
   tw <- newTVarIO w0
   tp <- newTVarIO 0
   tl <- newTVarIO 0
@@ -90,7 +76,7 @@ main = do
 		k <- readTVar tp
 		l <- readTVar tl
 		let n = n' + l * 24
-		when (n<96) $ do
+		when (n<120) $ do
 			modifyTVar tw . flip M.adjust k . flip M.adjust (n `div` 24) . (comps %~) . flip M.adjust (n `mod` 8) $  select (n `mod` 24 `div` 8) .~ fromIntegral s
 		case n' of
 			125 ->	do	k <- readTVar tp
@@ -122,7 +108,7 @@ main = do
 				writeTChan tfb (122,floor $ flip (^.) offset (w M.! l) * 127)
 				writeTChan tfb (121, flip (^.) power (w M.! l))
 				-- writeTChan tfb (120, flip (^.) width (w M.! l))
-			126 -> when (s < 4) $ do
+			126 -> when (s < 5) $ do
 				writeTVar tl s
 				p <- readTVar tp
 				w <- flip (M.!) p `fmap` readTVar tw
@@ -146,14 +132,15 @@ main = do
   let cyc (Sequencer f) i =  do 
 		es <- forM ([0..4] ++ [5,6,7]) $ \k -> do
 			let x = fromIntegral i  * pi * 2 / 64 
-			(p,s,d,c) <- atomically $  do 
+			(fb,p,s,d,c) <- atomically $  do 
 				let x = fromIntegral i  * pi * 2 / (2 ^ 8)
 				ws <- flip (M.!) k `fmap` readTVar tw
-				let [p,s,d,c] = flip map [0..3] $ \r -> 
+				let [p,s,d,c,fb] = flip map [0..4] $ \r -> 
 					let Wave o a q p l xs = ws M.! r
-					in clip  . quantize ((fromIntegral q + 1)/128) . (o +) . (a *) . ao l $ sum $ map (^p) [a/4*sin (s/128*2*pi + x*w)/10 | (w,s,a) <- M.elems xs]
-				return (p,s,d,c)
-			return $ (k,p,s,d,c)
+					in clip  . quantize ((fromIntegral q + 1)/128) . (o +) . (a *) . ao l $ sum $ map (^p) [a/4*tri (s/128*2*pi + x*w)/10 | (w,s,a) <- M.elems xs]
+				return (fb,p,s,d,c)
+			return $ (k,fb,p,s,d,c)
+		print es
 		s <- f es
 		cyc s (i + 1)
 		  
@@ -166,10 +153,9 @@ clip x | x > 1 = 1
        | x < 0 = 0
        | otherwise = x
   		
-tri f 0 _ = 0  -- bug
-tri f w t = let
-	d = 2 * pi / w
-	n =(t + f) / d
+tri t = let
+	d = 2 * pi 
+	n = t / d
 	a = t - d * fromIntegral (floor n)
 	in (a * 2 / d) - 1
 	
