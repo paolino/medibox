@@ -81,19 +81,6 @@ bootSinH j =  do
 	return $  \t fb p a r -> do
 			withSC3n 57110 . sendBundle . bundle t . return $ 
                          s_new ("sinh" ++ show n) (-1) AddToTail 1 [("amp",a),("pitch",quantizefreq' (floor fb) $ p),("rel",r)]
-bootSinHR :: Int -> IO (Double -> Double -> Double -> Double ->  IO ())
-bootSinHR j =  do 
-	n <- randomIO :: IO Int
-	withSC3n j . send $ d_recv . synthdef ("sinh" ++ show n) . out 0 $ 
-		envGen KR 1 1 0 1 RemoveSynth (envPerc  (control KR "rel" 0.4) 0.001) *  (control KR "amp" 0.2) *mce  [
-		sinOsc AR (control KR "pitch" 250) 0,
-		sinOsc AR (control KR "pitch" 250 * 1.05) 0
-		]
-		
-	return $  \t p a r -> do
-			withSC3n 57110 . sendBundle . bundle t . return $ 
-                         s_new ("sinh" ++ show n) (-1) AddToTail 1 [("amp",a),("pitch",quantizefreq $ p),("rel",r)]
-
 
 bootSample :: Int -> (Int,(FilePath,String)) -> IO ()
 bootSample j (n,(fp,i)) = do
@@ -108,17 +95,15 @@ playSample  t p v r s = withSC3n 57110 . sendBundle . bundle t . return $
                                
 
 
-initSynths :: FilePath -> IO (Int -> Double -> Double -> Double -> Double -> Double ->  IO (), [Int])
-initSynths sampledir = do
-        putStrLn "Reading samples"
+initSynths :: [FilePath] -> IO (Int -> Double -> Double -> Double -> Double -> Double ->  IO (), [Int])
+initSynths samples = do
         forM_ servers $ \i -> withSC3n i . send $ p_new [(1, AddToTail, 0)]
-        ls <- map (id &&& takeBaseName)  `fmap` (find (depth ==? 0) (extension ==? ".wav") sampledir)
+        -- ls <- map (id &&& takeBaseName)  `fmap` (find (depth ==? 0) (extension ==? ".wav") sampledir)
+        let ls = map (id &&& takeBaseName) samples
         sequence_ $ do 
                 j <- servers
                 l <- zip [0..] ls
                 return $ bootSample j l
-	mapM_ print ls
-	bass <- bootSin 57110
 	pluck <- bootSinH 57110
 	let sel i t fb a p r 
 		| i == 7 = pluck t (fb * 128) (50 + p * 50*2) a r
@@ -131,7 +116,7 @@ initSynths sampledir = do
 
 newtype Sequencer = Sequencer ([(Int,Double,Double,Double,Double,Double)] -> IO Sequencer)
 
-noteOut :: FilePath -> IO (Sequencer,[Int])
+noteOut :: [FilePath] -> IO (Sequencer,[Int])
 noteOut s = do
 	(f,is) <- initSynths s
 	let g ts js  = do

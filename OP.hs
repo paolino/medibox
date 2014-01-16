@@ -57,7 +57,7 @@ echo (k,1) = (k,"AMP")
 echo (k,2) = (k,"RELEASE")
 echo (k,3) = (k,"DELAY")
 echo (k,4) = (k,"HARM")
-
+-- echo (k,125) = (k,"CUT")
 main :: IO ()
 main = do
   techo <- newTChanIO
@@ -128,7 +128,7 @@ main = do
   let ao l p 
 	| p >= l = p
 	| otherwise = 0
-  (s ,q) <- noteOut "Prova"
+  (s ,q) <- noteOut $  ["Samples/hiha.wav","Samples/snare.wav","Samples/kick.wav","Samples/perc1.wav","Samples/perc2.wav"]
   let cyc (Sequencer f) i =  do 
 		es <- forM ([0..4] ++ [5,6,7]) $ \k -> do
 			let x = fromIntegral i  * pi * 2 / 64 
