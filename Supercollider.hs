@@ -1,6 +1,6 @@
 {-# LANGUAGE TypeFamilies, FlexibleInstances, NoMonomorphismRestriction #-}
 
-module SC where
+module Supercollider where
 
 import Control.Arrow ((&&&))
 import qualified Data.IntMap as IM

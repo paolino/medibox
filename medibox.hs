@@ -13,7 +13,7 @@ import Control.Lens ((^.), at, traverse, (%~), _3,_4,(.~),_1,_2)
 import Control.Lens.TH
 import MidiComm
 import qualified Data.Map as M
-import SC
+import Supercollider
 
 
 
@@ -140,7 +140,6 @@ main = do
 					in clip  . quantize ((fromIntegral q + 1)/128) . (o +) . (a *) . ao l $ sum $ map (^p) [a/4*tri (s/128*2*pi + x*w)/10 | (w,s,a) <- M.elems xs]
 				return (fb,p,s,d,c)
 			return $ (k,fb,p,s,d,c)
-		print es
 		s <- f es
 		cyc s (i + 1)
 		  

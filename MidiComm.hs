@@ -11,7 +11,6 @@ import Sound.ALSA.Sequencer.Event
 import Sound.ALSA.Sequencer.Connect
 import Sound.ALSA.Sequencer 
 import Sound.ALSA.Exception  
-import System.Time.Monotonic
 
 
 import Control.Concurrent
@@ -22,7 +21,6 @@ midiOutNote :: String  -- ^ client name
         -> TChan (Int,Int,Int,Bool)  -- ^ event channel
         -> IO ()
 midiOutNote name ech = (`catch` \e -> putStrLn $ "midi_exception: " ++ show e) $ do
-  cl <- newClock
   tn <- newTVarIO 0
   withDefault Block $ \h -> do
         setName (h :: Sound.ALSA.Sequencer.T OutputMode) $ name ++ "note out"
