@@ -21,14 +21,34 @@ import Control.Lens ((^.), at, traverse, (%~), _3,_4,(.~),_1,_2)
 import MidiComm
 import qualified Data.Map as M
 
+delta = 0.120 * 256
+pos t = let 
+        n = floor (t / delta)
+        z = fromIntegral n * delta
+        in floor $ (t - z)/delta * 256
 
 
-import Wave
+        
+        
+core :: Int -> TChan (Int,Int,Int) -> TVar (M.Map Int [(Int,Int,Int)]) -> IO ()
+core p' mi re  = do
+        n <- atomically $ readTChan mi  
+        p <- pos `fmap` time
+        atomically $ 
+                if p /= p' then do
+                          modifyTVar re . flip M.adjust p $ (\_ -> [n]) 
+                else do 
+                        modifyTVar re . flip M.adjust p $ (n:)
+        print (n,p)
+        core p mi  re 
+        
 
 main :: IO ()
 main = do
-  tw <- newTVarIO initWave
-  forkIO $ mantain "showwave" tw
+  tw <- newTVarIO (M.fromList $ zip  [0..256-1 :: Int] $ repeat [])
+  tc <- newTChanIO
+  forkIO $ core 0 tc tw
+  forkIO $ midiInNoteOn "notes_graph" tc
   initGUI
   
 
@@ -53,7 +73,7 @@ main = do
   
   canvas <- glDrawingAreaNew glconfig
 
-  widgetSetSizeRequest canvas 1000 700
+  widgetSetSizeRequest canvas 1000 500
   -- Initialise some GL setting just before the canvas first gets shown
   -- (We can't initialise these things earlier since the GL resources that
   -- we are using wouldn't heve been setup yet)
@@ -71,7 +91,7 @@ main = do
     withGLDrawingArea canvas $ \glwindow -> do
       clear [DepthBuffer, ColorBuffer]
       w <- atomically $ readTVar tw
-      draw w 
+      draw (M.assocs w)
       glDrawableSwapBuffers glwindow
     return True
   
@@ -93,23 +113,14 @@ main = do
 
 color4f r g b a = color $ Color4 r g (b :: GLfloat) a
 vertex2f x y = vertex $ Vertex2 x (y :: GLfloat)
-draw ws  = do
+draw ws = do
   matrixMode $= Modelview 0
   loadIdentity
-  forM_ [0..7] $ \k -> do
-        let     inst = ws M.! k
-                y0 = fromIntegral k / 8 
-        forM_ [0..3] $ \nw -> do
-                let     wave = inst M.! nw
-                renderPrimitive LineStrip $ do
-                               case nw of 
-                                        0 -> color4f 0 0 0 1
-                                        1 -> color4f 1 0 0 1
-                                        2 -> color4f 0 1 0 1
-                                        3 -> color4f 0 0 1 1
-                               forM_ [0,0.001 .. 1] $ \x -> vertex2f x (y0 + realToFrac (evalWave wave (realToFrac x * 2* pi))/8)
-				
-  forM_ [0..32]	$ \x ->  renderPrimitive LineStrip $ do
-		color4f 0.5 0.6 0.7 1
-		vertex2f (x/32) 0
-		vertex2f (x/32) 1
+  renderPrimitive LineStrip $ do
+                forM_ ws $ \(t,xs) -> 
+                        forM_ xs $ \(c,p,f) -> do
+                                when (c == 5) $ do 
+                                        color4f 0.5 0.2 0.7 1
+                                        renderPrimitive LineStrip $ forM_ [0,0.1..2 * pi] $ \a -> do
+                                                vertex2f (cos a * fromIntegral f/512 + fromIntegral t/256) ((sin a * fromIntegral f/512 + fromIntegral p/128)/1)
+
