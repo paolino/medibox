@@ -87,14 +87,21 @@ x = Synth(\pulf);
 
 
 
-~signal= {SinOsc.ar(400, 0, 1)!2}
+	~signal= {SinOsc.ar(400, 0, 1)!2}
 
 
 ~signal= {SinOsc.ar([400, 404], 0, LFNoise0.kr(4))}
 
 
 ~signal= {Saw.ar([400, 404],  LFNoise0.kr(4))}
-
+~signal = {|freq=0.5,dur=0.5,trate=0.5,sw=1,amp=0.5,pos=0.5,pos2=0.5,vol=0.4|
+    var clk, pan,gen,env;
+    clk = Impulse.ar(trate*200,sw);
+    pan = WhiteNoise.ar(0.1);
+	//env = Env.perc(0.001, 1, 1, -8) ;
+	//gen = EnvGen.kr(env, gate, doneAction: 2);
+		LPF.ar(TGrains.ar(2, clk, 3, 0.5 +freq, ((pos + pos2/10)*BufDur.kr(3))  + (amp/10/BufDur.kr(3)* LFSaw.ar(trate*200)), ((2 + (dur*48))/1000), pan, vol, 512),500)
+}
 
 ~signal= {Saw.ar([400, 404],  Pulse.ar(2))}
 
@@ -118,7 +125,14 @@ x = Synth(\pulf);
 
 
 ~signal= {Blip.ar([400, 404],  MouseX.kr(4, 40), LFNoise0.kr(4))}
-
+~signal = {|freq=0.5,dur=0.5,trate=0.5,sw=1,amp=0.5,pos=0.5,pos2=0.5,vol=0.4|
+    var clk, pan,gen,env;
+    clk = Impulse.ar(trate*200,sw);
+    pan = WhiteNoise.ar(0.1);
+	//env = Env.perc(0.001, 1, 1, -8) ;
+	//gen = EnvGen.kr(env, gate, doneAction: 2);
+		LPF.ar(TGrains.ar(2, clk, 3, 0.5 +freq, ((pos + pos2/10)*BufDur.kr(3))  + (amp/10/BufDur.kr(3)* LFSaw.ar(trate*200)), ((2 + (dur*48))/1000), pan, vol, 512),500)
+}
 
 ~signal= {Blip.ar([200, 204],  5, Pulse.ar(1))}
 
@@ -264,7 +278,7 @@ MIDIFunc.cc({arg ...args; ~signal.set (\pos2,args[0]/128);args.postln}, 6); // m
 )
 a=Synth(\bass1);
 s.boot;
-s.sendMsg(\b_allocRead, 3, "/home/paolino/Music/kickmono.wav");
+s.sendMsg(\b_allocRead, 3, "/home/paolino/WAV/ByType/Percussion/mono/7.wav");
 // get a bus
 b = Bus.control(s);
 a = Synth(\help_notRand);
@@ -278,31 +292,64 @@ SynthDef(\micro,{|freq=0.5,dur=0.5,trate=0.5,sw=1,amp=0.5,pos=0.5,pos2=0.5,vol=0
 	Out.ar(0,TGrains.ar(2, clk, 3, 0.5 +freq, ((pos + pos2/10)*BufDur.kr(3))  + (amp/10/BufDur.kr(3)* LFSaw.ar(sw*100)),((2 + (dur*48))/1000) , pan, vol))
 }).add;
 )
-	p = ProxySpace.push(s)
-~signal = {|freq=0.5,dur=0.5,trate=0.5,sw=1,amp=0.5,pos=0.5,pos2=0.5,vol=0.4|
+p = ProxySpace.push(s)
+
+
+~signal = {|freq=0.5,dur=0.5,trate=0.5,sw=1,amp=0.5,pos=0.5,pos2=0.5,vol=0.4,freqdur,phadur,ampdur,freqpos,phapos,amppos|
     var clk, pan,gen,env;
-    clk = Impulse.ar(trate*200,sw);
-    pan = WhiteNoise.ar(0.1);
+		clk = Gate.ar(Impulse.ar(trate*100),LFSaw.ar(2)-0.5);
+    pan = WhiteNoise.ar(0.3);
 	//env = Env.perc(0.001, 1, 1, -8) ;
 	//gen = EnvGen.kr(env, gate, doneAction: 2);
-		LPF.ar(TGrains.ar(2, clk, 3, 0.5 +freq, ((pos + pos2/10)*BufDur.kr(3))  + (amp/10/BufDur.kr(3)* LFSaw.ar(trate*200)), ((2 + (dur*48))/1000), pan, vol, 512),500)
+		Pan2.ar(Mix.ar (LPF.ar (TGrains.ar(2, clk, 3, 0.5 +freq, ((1 + (WhiteNoise.ar()/2))*BufDur.kr(3))  + (amp*BufDur.kr(3)* (0.5 + (LFSaw.ar(freqpos,phapos)*amppos))),BufDur.kr(3)*dur * (1 + (LFSaw.ar(freqdur,phadur)*ampdur)), pan, vol, 512),5000)))
 }
 
+~signal = {|freq=0.5,dur=0.5,trate=0.5,sw=1,amp=0.5,pos=0.5,pos2=0.5,vol=0.4,freqdur,phadur,ampdur,freqpos,phapos,amppos|
+    var clk, pan,gen,env;
+		clk = Gate.ar(Impulse.ar(trate*100),LFSaw.ar(2)-0.5);
+    pan = WhiteNoise.ar(0.3);
+	//env = Env.perc(0.001, 1, 1, -8) ;
+	//gen = EnvGen.kr(env, gate, doneAction: 2);
+		Pan2.ar(Mix.ar (LPF.ar (TGrains.ar(2, clk, 3, 0.5 +freq, ((pos + pos2/10)*BufDur.kr(3))  + (amp*BufDur.kr(3)* (0.5 + (LFSaw.ar(freqpos,phapos)*amppos))),BufDur.kr(3)*dur * (1 + (LFSaw.ar(,phadur)*ampdur)), pan, vol, 512),5000)))
+}
 ~signal.play
+~signal.stop
 ;
 )
-MIDIIn.connectAll;
-(
 
-MIDIFunc.cc({arg ...args; ~signal.set (\freq,args[0]/128);args.postln}, 0); // match cc 1.
-MIDIFunc.cc({arg ...args; ~signal.set (\dur,args[0]/128);args.postln}, 1); // match cc 1
-MIDIFunc.cc({arg ...args; ~signal.set (\trate,args[0]/128);args.postln}, 2); // match cc 1
-MIDIFunc.cc({arg ...args; ~signal.set (\sw,args[0]/128);args.postln}, 3); // match cc 1
-MIDIFunc.cc({arg ...args; ~signal.set (\amp,args[0]/128);args.postln}, 4); // match cc 1
-MIDIFunc.cc({arg ...args; ~signal.set (\pos,args[0]/128);args.postln}, 5); // match cc 1
-MIDIFunc.cc({arg ...args; ~signal.set (\pos2,args[0]/128);args.postln}, 6); // match cc 1
-MIDIFunc.cc({arg ...args; ~signal.set (\vol,args[0]/128);args.postln}, 7); // match cc 1
+(
+p = Pbind(
+    \type, \set,    // This tells it we'll be setting parameters of an existing node...
+    \id, ~signal,    // ...this tells it whose parameters we'll be setting
+    \args, #[\freq, \vol],  // and this tells it which parameters to set
+    \freq, Pwhite(0.4, 0.8,inf),
+    \dur, 0.2,
+    \vol, Pseq((0.5,0.45 .. 0.1), inf)
+).play;
 )
+~signa
+p.stop
+x.free
+
+MIDIIn.connectAll;
+	(
+
+		MIDIFunc.cc({arg ...args; ~signal.set (\freq,args[0]/128);args.postln}, 0); // match cc 1.
+		MIDIFunc.cc({arg ...args; ~signal.set (\dur,args[0]/128);args.postln}, 1); // match cc 1
+		MIDIFunc.cc({arg ...args; ~signal.set (\trate,args[0]/128);args.postln}, 2); // match cc 1
+		MIDIFunc.cc({arg ...args; ~signal.set (\sw,args[0]/128);args.postln}, 3); // match cc 1
+		MIDIFunc.cc({arg ...args; ~signal.set (\amp,args[0]/128);args.postln}, 4); // match cc 1
+		MIDIFunc.cc({arg ...args; ~signal.set (\pos,args[0]/128);args.postln}, 5); // match cc 1
+		MIDIFunc.cc({arg ...args; ~signal.set (\pos2,args[0]/128);args.postln}, 6); // match cc 1
+		MIDIFunc.cc({arg ...args; ~signal.set (\vol,args[0]/128);args.postln}, 7); // match cc 1
+		MIDIFunc.cc({arg ...args; ~signal.set (\freqdur,args[0]/128);args.postln}, 8); // match cc 1
+		MIDIFunc.cc({arg ...args; ~signal.set (\phadur,args[0]/128);args.postln}, 9); // match cc 1
+		MIDIFunc.cc({arg ...args; ~signal.set (\ampdur,args[0]/128);args.postln}, 10); // match cc 1
+		MIDIFunc.cc({arg ...args; ~signal.set (\freqppos,args[0]/128);args.postln}, 11); // match cc 1
+		MIDIFunc.cc({arg ...args; ~signal.set (\phapos,args[0]/128);args.postln}, 12); // match cc 1
+		MIDIFunc.cc({arg ...args; ~signal.set (\amppos,args[0]/128);args.postln}, 13); // match cc 1
+
+	)
 
 (
 SynthDef(\ixibass, {arg out=0, amp=0.3, t_trig=1, freq=100, rq=0.004;

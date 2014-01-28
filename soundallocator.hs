@@ -68,43 +68,44 @@ initSynths globs = do
 
 newtype Sequencer = Sequencer ((Time -> Double -> IO ()) -> IO Sequencer)
 
+quantize t0 dt d't = t0 + (fromIntegral (floor $ dt/d't)  + 1) * d't
 sequencer :: Time -> Time -> TVar Integer -> TVar Integer -> IO (Sequencer,TVar Integer)
 sequencer ot t0 tp td  = do
 	tz <- newTVarIO 34
-	let g f  = do
-		t <- time
+	tq <- newTVarIO 1
+	let g v t f  = do
 		let dt = t - t0
 		(t',v') <- atomically $ do
-			v <- readTVar tz
+			v0 <- readTVar tz
+			q <- readTVar tq
 			p <- readTVar tp
 			d <- readTVar td
 			let 	
-				(n,z) = (d*v +  p) `divMod` 128
+				(n,z) = (d*v +  p) `divMod` 256
 				
 				-- v'= z
 				v' = (head $ dropWhile (<=z) $ iterate (*2) 1)
-				d't = fromIntegral (n + 1)*fromIntegral v'/1048
-			modifyTVar tz $ \_ -> z
-			return $ trace (show d't) $  (t0 + (fromIntegral (floor $ dt/d't)  + 1) * d't, z)
-		f  t' (fromIntegral v'/ 128)
+				d't = fromIntegral v'/1048
+				timev' = fromIntegral n * d't + quantize t0 dt d't
+				nexttick = quantize t0 dt q
+				(tev,val) = if nexttick > timev' then (timev',z) else (nexttick,v0)
+				
+			return $ trace (show (tev,val)) $  (tev, val)
+		f  t' (fromIntegral v'/ 256)
 		pauseThreadUntil t'
-		return (Sequencer g)
-	return (Sequencer g, tz) 
+		return (Sequencer (g v' t'))
+	return (Sequencer (g 34 t0), tz) 
 
-samplesequencer :: Time -> Time -> Integer -> IO (TVar Integer,TVar Integer, TVar Integer, TVar Integer,TVar Double,TVar Integer,TVar Integer)
+samplesequencer :: Time -> Time -> Integer -> IO (TVar Integer,TVar Integer, TVar Integer, TVar Integer,TVar Double,TVar Integer)
 samplesequencer ot t0 d = do
 	tp <- newTVarIO 43
 	td <- newTVarIO d
 	tv <- newTVarIO 0
 	tf <- newTVarIO 0
 	tsa <- newTVarIO 0
-	tzl <- newTVarIO 8
-	tzb <- newTVarIO 0
 	(s,tz) <- sequencer ot t0 tp td  
 	let loop n (Sequencer f)  = do
 		f' <- atomically $ do 
-			reset <- readTVar tzl
-			when (n `mod` (reset + 1) == 0) $ readTVar tzb >>= writeTVar tz
 			d <- readTVar td
 			v <- readTVar tv
 			fh <- readTVar tf
@@ -112,7 +113,7 @@ samplesequencer ot t0 d = do
 			return $ \t r -> playSample sa (t + fromIntegral fh / 128 * 0.5 ) 0.5 (r*v) (4*r)
 		f f' >>= loop (n + 1)
 	forkIO $ loop 0 s
-	return (tf,tsa,tp,td,tv,tzl, tzb)
+	return (tf,tsa,tp,td,tv,tz)
 unzip4 = foldr f ([],[],[],[]) where
 		f (x,y,z,g) (xs,ys,zs,gs) = (x:xs,y:ys,z:zs,g:gs)
 unzip5 = foldr f ([],[],[],[],[]) where
@@ -124,7 +125,7 @@ unzip7 = foldr f ([],[],[],[],[],[],[]) where
 main = do 
 	ls <- initSynths "/home/paolino/WAV/*/*/*.wav"
 	t <- time
-	(tf,tsa,tp,td,tv,tzl,tzb) <- unzip7 `fmap` (replicateM 8 $ samplesequencer 1 t 64)
+	(tf,tsa,tp,td,tv,tz) <- unzip6 `fmap` (replicateM 8 $ samplesequencer 1 t 64)
 	mc <- newTChanIO
 	forkIO $ midiIn "samples" 0 mc
 	forever $ do 
@@ -137,8 +138,7 @@ main = do
 					2 -> modifyTVar (td !! y) . const $ fromIntegral s 
 					3 -> modifyTVar (tv !! y) . const $ fromIntegral s / 128
 					4 -> modifyTVar (tf !! y) . const $ fromIntegral s 
-					5 -> modifyTVar (tzl !! y) . const $ fromIntegral s 
-					6 -> modifyTVar (tzb !! y) . const $ fromIntegral s 
+					5 -> modifyTVar (tz !! y) . const $ fromIntegral s 
 					_ -> return ()
 			
 			
