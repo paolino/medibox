@@ -8,7 +8,7 @@ import Control.Concurrent.STM
 import Control.Concurrent
 
 import Control.Arrow
-import Control.Lens ((^.), at, traverse, (%~), _3,_4,(.~),_1,_2)
+import Control.Lens ((^.), at, traverse, (%~), _3,_4,(.~),_1,_2,view)
 import Control.Lens.TH
 import MidiComm
 import qualified Data.Map as M
@@ -76,23 +76,36 @@ evalWave (Wave sh o p xs) x  = clip $ (fromIntegral o/128 +) . sum $ map (flip z
 
 
 
-mantain :: String -> TVar (M.Map Int (M.Map Int Wave)) -> IO ()
-mantain s tw = do
+mantain :: String -> TVar (M.Map Int (M.Map Int Wave)) -> TVar (Double, Double,M.Map Int (M.Map Int Double)) -> IO ()
+mantain s tw th = do
   tp <- newTVarIO 0
   tc <- newTChanIO
   tfb <- newTChanIO 
+  tcP <- newTChanIO
+  tfbP <- newTChanIO 
+
+  forkIO $ midiOut (s ++ ": feedbackPar") 1 tfbP
+  forkIO $ midiIn (s ++ ": inputPar") 1 tcP
+  forkIO . forever . atomically $ do 
+		(n,s) <- readTChan tcP
+                k <- readTVar tp
+                when (n < 24) $ modifyTVar th $ _3 %~ flip M.adjust k (flip M.adjust n (const $  fromIntegral s / 128))
+
+
+
   forkIO $ midiOut (s ++ ": feedback") 0 tfb
   forkIO $ midiIn (s ++ ": input") 0 tc
   
   forever . atomically $ do 
 		(n,s) <- readTChan tc
                 k <- readTVar tp
-
 		if n<24 then do
                         let     (y,x) = n `divMod` 8
                                 (l',w) = x `divMod` 2
 			modifyTVar tw . flip M.adjust k . flip M.adjust l' . (comps %~) . flip M.adjust w $  select y .~ fromIntegral s
-		else case n of
+		  else case n of
+                        100 -> modifyTVar th $ _1 .~ fromIntegral s / 128
+                        101 -> modifyTVar th $ _2 .~ fromIntegral s / 128
 			25 ->	modifyTVar tw . flip M.adjust k . flip M.adjust 0 $ power .~ s
 			24 ->	modifyTVar tw . flip M.adjust k . flip M.adjust 0 $ offset  .~ (s)
 			27 ->	modifyTVar tw . flip M.adjust k . flip M.adjust 1 $ power .~ s
@@ -108,6 +121,7 @@ mantain s tw = do
                         -- change channel
 			127 -> when (s < 8) $ do 
 				writeTVar tp s
+                                wn <- (flip (M.!) s . view _3) `fmap` readTVar th
 				w <- flip (M.!) s `fmap` readTVar tw
 				forM_ [0 .. 23]  $ \n -> do 
                                         let     (y,x) = n `divMod` 8
@@ -117,6 +131,8 @@ mantain s tw = do
                                         writeTChan tfb (25 + l * 2, flip (^.) power (w M.! l))
                                         writeTChan tfb (24 + l * 2, flip (^.) offset (w M.! l))
                                         writeTChan tfb (32 + l * 2, fromEnum $ flip (^.) shape (w M.! l))
+                                forM_ [0..23] $ \l -> 
+                                        writeTChan tfbP (l,floor $ (128 * (wn M.! l))) 
 			_ -> return ()
 		
 	

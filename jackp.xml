@@ -15,6 +15,9 @@
    <plug>out_7</plug>
    <plug>out_8</plug>
   </socket>
+  <socket exclusive="off" client="bridge-[0-9]+" type="jack-audio" name="bridge-1591">
+   <plug>monitor_1</plug>
+  </socket>
   <socket exclusive="off" client="Midi Through" type="alsa-midi" name="Midi Through">
    <plug>Midi Through Port-0</plug>
   </socket>
@@ -22,17 +25,23 @@
    <plug>BCR[0-9]+ MIDI 1</plug>
    <plug>BCR[0-9]+ MIDI 2</plug>
   </socket>
+  <socket exclusive="off" client="player: feedbackParctrl out" type="alsa-midi" name="player: feedbackParctrl out">
+   <plug>midi out</plug>
+  </socket>
   <socket exclusive="off" client="player: feedbackctrl out" type="alsa-midi" name="player: feedbackctrl out">
    <plug>midi out</plug>
   </socket>
   <socket exclusive="off" client="showwave: feedbackctrl out" type="alsa-midi" name="showwave: feedbackctrl out">
    <plug>midi out</plug>
   </socket>
-  <socket exclusive="off" client="player" type="alsa-midi" name="player">
+  <socket exclusive="off" client="midi set" type="alsa-midi" name="midi set">
    <plug>midi out</plug>
   </socket>
  </output-sockets>
  <input-sockets>
+  <socket exclusive="off" client="bridge-[0-9]+" type="jack-audio" name="Input Socket 10">
+   <plug>meter_1</plug>
+  </socket>
   <socket exclusive="off" client="system" type="jack-audio" name="system">
    <plug>playback_1</plug>
    <plug>playback_2</plug>
@@ -50,12 +59,37 @@
   <socket exclusive="off" client="Midi Through" type="alsa-midi" name="Midi Through">
    <plug>Midi Through Port-0</plug>
   </socket>
+  <socket exclusive="off" client="bridge-[0-9]+" type="jack-audio" name="meters">
+   <plug>meter_1</plug>
+   <plug>meter_2</plug>
+   <plug>meter_3</plug>
+   <plug>meter_4</plug>
+   <plug>meter_5</plug>
+   <plug>meter_6</plug>
+   <plug>meter_7</plug>
+   <plug>meter_8</plug>
+  </socket>
+  <socket exclusive="off" client="SuperCollider" type="alsa-midi" name="supercollider midi">
+   <plug>in0</plug>
+   <plug>in1</plug>
+   <plug>in2</plug>
+   <plug>in3</plug>
+   <plug>in4</plug>
+   <plug>in5</plug>
+   <plug>in6</plug>
+  </socket>
   <socket exclusive="off" client="BCR[0-9]+" type="alsa-midi" name="BCR2000">
    <plug>BCR[0-9]+ MIDI 1</plug>
    <plug>BCR[0-9]+ MIDI 2</plug>
    <plug>BCR[0-9]+ MIDI 3</plug>
   </socket>
+  <socket exclusive="off" client="player: inputParctrl in" type="alsa-midi" name="player: inputParctrl in">
+   <plug>midi in</plug>
+  </socket>
   <socket exclusive="off" client="player: inputctrl in" type="alsa-midi" name="player: inputctrl in">
+   <plug>midi in</plug>
+  </socket>
+  <socket exclusive="off" client="midi set" type="alsa-midi" name="midi set">
    <plug>midi in</plug>
   </socket>
   <socket exclusive="off" client="showwave: inputctrl in" type="alsa-midi" name="showwave: inputctrl in">
@@ -65,11 +99,15 @@
  <slots/>
  <cables>
   <cable output="SuperCollider" input="system" type="jack-audio"/>
+  <cable output="SuperCollider" input="meters" type="jack-audio"/>
   <cable output="BCR2000" input="player: inputctrl in" type="alsa-midi"/>
   <cable output="BCR2000" input="showwave: inputctrl in" type="alsa-midi"/>
+  <cable output="BCR2000" input="player: inputParctrl in" type="alsa-midi"/>
+  <cable output="BCR2000" input="supercollider midi" type="alsa-midi"/>
+  <cable output="player: feedbackParctrl out" input="BCR2000" type="alsa-midi"/>
   <cable output="player: feedbackctrl out" input="BCR2000" type="alsa-midi"/>
   <cable output="player: feedbackctrl out" input="showwave: inputctrl in" type="alsa-midi"/>
-  <cable output="showwave: feedbackctrl out" input="BCR2000" type="alsa-midi"/>
+  <cable output="midi set" input="BCR2000" type="alsa-midi"/>
  </cables>
 </patchbay>
 

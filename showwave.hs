@@ -28,7 +28,8 @@ import Wave
 main :: IO ()
 main = do
   tw <- newTVarIO initWave
-  forkIO $ mantain "showwave" tw
+  ha <- newTVarIO (0,0)
+  forkIO $ mantain "showwave" tw ha
   initGUI
   
 

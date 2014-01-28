@@ -17,6 +17,25 @@ import Control.Concurrent
 import Control.Concurrent.STM
 import Control.Monad
 
+midiInNoteOn :: String  -- ^ client name
+        -> TChan (Int,Int,Int)  -- ^ event channel
+        -> IO ()
+midiInNoteOn name incha = (`catch` \e -> putStrLn $ "midi_exception: " ++ show e) $ do
+  withDefault Block $ \h -> do
+        setName (h :: Sound.ALSA.Sequencer.T InputMode) $ name ++ "note out"
+        c <- getId h
+        withSimple h "midi in" (caps [capWrite, capSubsWrite]) typeMidiGeneric $ \p -> forever $ do
+                ev <-  input h
+                case body ev of
+                     NoteEv NoteOn      (Note  
+                                        (Channel (fromIntegral -> cha)) 
+                                        (Pitch (fromIntegral -> pitch)) 
+                                        (Velocity (fromIntegral -> vel))
+                                        _
+                                        _
+                                        ) -> atomically $ writeTChan incha (cha,pitch,vel)
+                     _ -> return ()           
+
 midiOutNote :: String  -- ^ client name
         -> TChan (Int,Int,Int,Bool)  -- ^ event channel
         -> IO ()
