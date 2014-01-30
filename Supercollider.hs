@@ -230,9 +230,6 @@ initSynths samples = do
 		| i == 7 = zuck  t (50 + p * 50) a r ha fb ps
 		| i == 6 = pluck t  (50*4 + p * 50*4) a r ha fb ps 
 		| i == 5 = pluck t (50*8 + p * 50*8) a r ha fb ps
-		| i < 5 = do 
-			t <- time
-			playSample t p a r . snd . fromJust . lookup i . zip [0..] $ ls
 	return $ (sel , map fst . zip [0..] $ ls)
 
 newtype Sequencer = Sequencer ([(Int,Double,Double,Double,Double,Double,Double,IM.Map Int Double)] -> IO Sequencer)

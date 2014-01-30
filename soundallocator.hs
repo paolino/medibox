@@ -19,52 +19,11 @@ import Data.Maybe
 import System.Random
 
 import MidiComm
+import SupercolliderComm
+import Samples
 import Debug.Trace
 
-collapse 0 = 0
-collapse 1 = 0
-collapse 2 = 2
-collapse 3 = 3
-collapse 4 = 3
-collapse 5 = 5
-collapse 6 = 7
-collapse 7 = 7
-collapse 8 = 8
-collapse 9 = 7
-collapse 10 = 12
-collapse 11 = 12
 
-withSC3n :: Int -> Connection UDP a -> IO a
-withSC3n i = withTransport (openUDP "127.0.0.1" $ fromIntegral i)
-
-servers = [57110]
-
-bootSample :: Int -> (Int,FilePath) -> IO ()
-bootSample j (n,fp) = do
-        withSC3n j . send $ b_free n
-        withSC3n j . send $ b_allocRead n fp 0 0
-        withSC3n j . send $ d_recv . synthdef (show n) . out 0 $ envGen KR 1 1 0 1 RemoveSynth (envPerc' 0.001 (control KR "rel" 0.1) 1.0 (EnvNum 1, EnvNum 1)) *  (control KR "amp" 0) * orig
-        where orig =  playBuf 2 AR (fromIntegral n) (0.5 + 1.5 * control KR "pitch" 0) 1 0 NoLoop RemoveSynth  
-
-
-playSample  s t p v r  = withSC3n 57110 . sendBundle . bundle t . return $ 
-                         s_new (show s) (-1) AddToTail 1 $ [("amp",v),("pitch",p),("rel",r)]
-                               
-
-
-initSynths :: String -> IO [String]
-initSynths globs = do
-        forM_ servers $ \i -> withSC3n i . send $ p_new [(1, AddToTail, 0)]
-        ls <- namesMatching globs
-	t <- time
-        sequence_ $ do 
-                j <- servers
-                l@(i,_) <- zip [0..] ls
-                return $  do 	
-			bootSample j l
-			playSample i (t + 3 + fromIntegral i * 0.005) 0.5 0.1 (0.005)
-	
-	return ls
 
 newtype Sequencer = Sequencer ((Time -> Double -> IO ()) -> IO Sequencer)
 
