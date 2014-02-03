@@ -45,6 +45,8 @@ withSC3n i = withTransport (openUDP "127.0.0.1" $ fromIntegral i)
 
 servers = [57110]
 freqs y = [440 * (1.059463)^^x | x <- map (subtract 48 . (+y) . modcollapse) [0 .. 300]]
+quantizefreq x = quantf x $ zip `ap` tail $ freqs 40
+quantizefreq' f x = quantf x $ zip `ap` tail $ freqs f
 
 quantf _ [] = 0
 quantf x ((y',y''):rs) 
@@ -52,8 +54,6 @@ quantf x ((y',y''):rs)
 	  | x <= y'  = y'
 	  | otherwise = quantf x  rs
 
-quantizefreq x = quantf x $ zip `ap` tail $ freqs 40
-quantizefreq' f x = quantf x $ zip `ap` tail $ freqs f
 
 
 quantize2 k y x = let 
