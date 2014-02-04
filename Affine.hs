@@ -78,7 +78,7 @@ main = do
   	ws <- decodeFile "current.bb"
 	se <- forM ws $ newTVarIO
 	-- se <- replicateM 8 $ newTVarIO (Environment (AffineParams 1 0 64 0) 0 4 0 0 $ M.fromList $ zip [0..] $ replicate 24 0)
-	ls <- initSamples "/home/paolino/WAV/*/*/*.wav"
+	-- ls <- initSamples "/home/paolino/WAV/*/*/*.wav"
 	
 	let 	loop :: Int  -> TVar Environment -> Sequencer Affine1 -> IO ()
 		loop c s (Sequencer f) = f (affineseq c s) >>= loop c s
