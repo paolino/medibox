@@ -45,8 +45,8 @@ bootSample j (n,fp) = do
         withSC3n j . send $ b_allocRead n fp 0 0
         withSC3n j . send $ b_free (n + 1)
         withSC3n j . send $ b_allocReadChannel (n + 1) fp 0 0 [0]
-        withSC3n j . send $ d_recv . synthdef (show $ n `div` 2) . out 0  $  (envGen KR 1 1 0 1 RemoveSynth (envPerc' 0.001 
-		(maximum (map (flip fckr 4) [0..2]) * control KR "rel" 0.1) 1.0 (EnvNum 1, EnvNum 1)) *  (control KR "amp" 0) * ((+ orig') . (/3) . sum $ map orig'' [0..2]))
+        withSC3n j . send $ d_recv . synthdef (show $ n `div` 2) . out 0  $  
+		(envGen KR 1 1 0 1 RemoveSynth (envPerc' (fckr 0 15 / 10) (control KR "rel" 0.1 - fckr 0 15/ 10) 1.0 (EnvNum 1, EnvNum 1)) *  (control KR "amp" 0) * (orig' + (sum $ map orig'' [0..2])))
 	where 	
 		orig' =  (control KR "23" 0) * playBuf 2 AR (fromIntegral n) (0.5 + 1.5 * control KR "pitch" 0) 1 0 NoLoop DoNothing 
 		{-
@@ -58,24 +58,23 @@ bootSample j (n,fp) = do
 			| x <- [0..2]
 			]
 		-}
-		fckr i = flip (control KR) 0 . show . (+ (i * 8))
-		orig'' i =   (envGen KR 1 1 0 1 DoNothing (envPerc' 0.001 (control KR "rel" 0.1 * (fckr i 4)) 1.0 (EnvNum (-1), EnvNum (-1)))) * tGrains 2 
-				(impulse AR (1000 * fckr i 0)  0) --freq
+		fckr i = flip (control KR) 0 . show . (+ 0)
+		fckr' i = flip (control KR) 0 . show . (+ 8*i)
+		orig'' i = {-  (envGen KR 1 1 0 1 DoNothing (envPerc' 0.001 (control KR "rel" 0.1 * (fckr i 4)) 1.0 (EnvNum (-1), EnvNum (6)))) -} 
+				
+				tGrains 2 
+				(impulse AR (1000 * fckr' i 0)  0) --freq
 				(fromIntegral $ n + 1)
-				1 -- (0.5 + fckr i 6)
-				(line AR 
-					(fckr i 2 / 10) 
-					(fckr i 2 /10 + fckr i 3/10) 
-					((fckr i 4) * (control KR "rel" 0.1))
-					DoNothing
-				) -- pos
-				(projectLin 0.002 0.050 $ fckr i 1) -- dur
+				1
+				(fckr i 3 * bufDur KR (fromIntegral $ n + 1))
+					
+				(projectExp 0.002 0.1 $ fckr i 1 * (1 + fckr i 2 * sinOsc AR (1000 * (fckr' i 0 + fckr i 4/1000)) 0))
 				0 
-				(fckr i 5) 
+				(fckr' i 5)
 				4
-playSample c s t p v r ps  =  withSC3n (57110 + c) . sendBundle . bundle t . return $ 
+playSample c s t p v r ps ap co =  withSC3n (57110 + c) . sendBundle . bundle t . return $ 
                          s_new (show s) (-1) AddToTail 1 $ [("amp",v),("pitch",p),("rel",r)] ++ 
-				(map (\(i,v) -> (show i,v)) $ M.assocs ps)
+				(map (\(i,v) -> (show i,v)) $ M.assocs . M.adjust (quantize2 ap co) 0 . M.adjust (quantize2 ap co) 8 . M.adjust (quantize2 ap co) 16 $ ps)
                                
 {-
 BPeakEQ.ar(
@@ -89,7 +88,7 @@ BPeakEQ.ar(
 initSamples :: String -> IO [String]
 initSamples globs = do
         forM_ servers $ \i -> withSC3n i . send $ p_new [(1, AddToTail, 0)]
-        ls <- namesMatching globs
+        ls <- sort `fmap` namesMatching globs
 	t <- time
         sequence_ $ do 
                 j <- servers

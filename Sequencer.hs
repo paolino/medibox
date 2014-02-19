@@ -25,7 +25,9 @@ type Beat = (Integer,Integer)
 fromBeat :: Period -> Beat -> Period 
 fromBeat q (n,k) = (fromIntegral n * q / fromIntegral k)
 
-
+quantizeBeat q (n,k) = let 
+	d = q / fromIntegral k
+	in (+ (d * (fromIntegral n - 1))) `fmap` quantize d
 -- sequencer interface
 data Feedback a = Feedback {
 		params :: Params a
@@ -35,7 +37,7 @@ data Feedback a = Feedback {
 	}
 
 -- A sequencer asks a callback at regular intervals
-newtype Sequencer a = Sequencer ((Time -> State a -> IO (Feedback a)) -> IO (Sequencer a))
+newtype Sequencer a = Sequencer ((Time -> Time -> State a -> IO (Feedback a)) -> IO (Sequencer a))
 
 
 -- step the state leaking a period subdivision
@@ -47,11 +49,12 @@ sequencer :: Step a -> Feedback a -> Sequencer a
 sequencer fpr  feed = 
 	let g (Feedback ps v0 l q) v f  = do
 		let	(be,v') = fpr v ps
-		nt <- quantize $ fromBeat q be
+		t <- time
+		nt <- quantizeBeat q be
 		nq <- quantize q
 		let 	(t',v'') =   if nq > nt then (nt,v') else (nq,v0)
 			t'' = fromBeat q l + t'
-		feed <- f  t'' v''
+		feed <- f  t'' (t' - t) v''
 		pauseThreadUntil t'
 		return . Sequencer $ g feed v''
 	in Sequencer $ g feed (reset feed)

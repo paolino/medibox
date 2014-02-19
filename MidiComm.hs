@@ -160,6 +160,36 @@ midiOutNP name recha ech = (`catch` \e -> putStrLn $ "midi_exception: " ++ show 
 						(Value $ fromIntegral val)
 						)
                 	void $ outputDirect h $ ev
+-- | Loop-broadcast control midi message on a specific channel
+midiOutNPx :: String  -- ^ client name
+        -> Int     -- ^ broadcast midi channel
+        -> TChan (Int,Int,Bool)  -- ^ event channel
+        -> IO ()
+midiOutNPx name recha ech = (`catch` \e -> putStrLn $ "midi_exception: " ++ show e) $ do
+  withDefault Block $ \h -> do
+        setName (h :: Sound.ALSA.Sequencer.T OutputMode) $ name ++ "ctrl out"
+        c <- getId h
+        withSimple h "midi out" (caps [capRead, capSubsRead]) typeMidiGeneric $ \p -> forever $ do
+                (par,val,t) <- atomically $ readTChan ech
+		if not t then 	let ev =  forConnection (toSubscribers (Sound.ALSA.Sequencer.Address.Cons c p)) $ 
+                                	CtrlEv Controller (Ctrl 
+                                        	(Channel $ fromIntegral recha) 
+                                        	(Parameter $ fromIntegral par) 
+                                        	(Value $ fromIntegral val)
+                                        	)
+                		in void $ outputDirect h $ ev 
+	
+		  else  do
+			let 	(p1,p2) = par `divMod` 127
+				(v1,v2) = val `divMod` 127
+			forM_ (zip [99,98,6,38] [p1,p2,v1,v2]) $ \(par,val) -> do
+				let ev =  forConnection (toSubscribers (Sound.ALSA.Sequencer.Address.Cons c p)) $ 
+						CtrlEv Controller (Ctrl 
+							(Channel $ fromIntegral recha) 
+							(Parameter $ fromIntegral par) 
+							(Value $ fromIntegral val)
+							)
+				void $ outputDirect h $ ev
 
 -- | Light fork midiIn an midiOut threads
 midiInOut  :: String  -- ^ client name
