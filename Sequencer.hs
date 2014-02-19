@@ -1,22 +1,21 @@
 {-# LANGUAGE TypeFamilies #-}
 
-module Sequencer where
+-- module Sequencer where
 
 import Sound.OSC (Time,time,pauseThreadUntil)
 import Control.Monad (ap)
 import Debug.Trace
-
-import Samples
+import Data.List
+import Control.Concurrent
+import Control.Concurrent.STM
 
 -- time difference
 type Period = Time
 
 -- find next beat from 0 time
-quantize :: Period -> IO Time
-quantize pe = (\dt ->  (fromIntegral . ceiling $ dt/pe) * pe) `fmap` time
+quantize :: Time -> Period -> IO Time
+quantize t0 pe = (t0 +) `fmap` (\dt ->  (fromIntegral . ceiling $ (dt - t0)/pe) * pe) `fmap` time
 
-type family Params a
-type family State a
 
 -- fraction of a measure
 type Beat = (Integer,Integer)
@@ -25,39 +24,40 @@ type Beat = (Integer,Integer)
 fromBeat :: Period -> Beat -> Period 
 fromBeat q (n,k) = (fromIntegral n * q / fromIntegral k)
 
-quantizeBeat q (n,k) = let 
-	d = q / fromIntegral k
-	in (+ (d * (fromIntegral n - 1))) `fmap` quantize d
 -- sequencer interface
-data Feedback a = Feedback {
-		params :: Params a
-	, 	reset :: State a
-	,	late :: Beat
-	,	measure :: Period
+data Config = Config {
+	       colpi :: [Beat] -- unsorted, finite
+        ,	late :: Beat
+	,	window :: Event
 	}
 
--- A sequencer asks a callback at regular intervals
-newtype Sequencer a = Sequencer ((Time -> Time -> State a -> IO (Feedback a)) -> IO (Sequencer a))
-
-
--- step the state leaking a period subdivision
-type Step a = State a -> Params a -> (Beat, State a)
-
+data Event = Event {
+        when :: Time
+        , dur :: Period
+        } deriving Show
 
 -- make a sequencer from a concurrent sequencing environment
-sequencer :: Step a -> Feedback a -> Sequencer a
-sequencer fpr  feed = 
-	let g (Feedback ps v0 l q) v f  = do
-		let	(be,v') = fpr v ps
-		t <- time
-		nt <- quantizeBeat q be
-		nq <- quantize q
-		let 	(t',v'') =   if nq > nt then (nt,v') else (nq,v0)
-			t'' = fromBeat q l + t'
-		feed <- f  t'' (t' - t) v''
+sequencer :: Time -> Sequencer 
+sequencer = Sequencer . g where
+	g t f (Config cs l (Event t0 q)) = do
+		nq <- quantize t0 q
+		let     t' = head $ dropWhile (<=t) . sort $ (nq - q:nq + q:nq : map (((nq - q) +) . fromBeat q) cs)
+                        t'' = fromBeat q l + t
+		f  $ Event t'' (t' - t)
 		pauseThreadUntil t'
-		return . Sequencer $ g feed v''
-	in Sequencer $ g feed (reset feed)
+		return . Sequencer $ g t' 
+
+adriver :: IO Config -> (Event -> IO ()) -> Time -> IO ()
+adriver ic f = loop . sequencer where
+                loop (Sequencer g) = ic >>= g f >>= loop
+        
+        
+main = do
+        t <- time
+        c1 <- newTVarIO $ Config [(1,2),(1,4)] (0,1) (Event t 2)
+        c2 <- newTVarIO $ Config [(1,3),(2,3)] (0,1) (Event t 2)
+        forkIO $ adriver (atomically $ readTVar c2) print t
+        adriver (atomically $ readTVar c1) (\x -> atomically (modifyTVar c2 (\(Config cs l _) -> Config cs l x))) t
 
 
 
