@@ -11,7 +11,6 @@ import Control.Concurrent.STM
 import qualified Data.Map as M
 
 import Samples
-import Bass
 import Sequencer
 import MidiComm
 
@@ -50,14 +49,27 @@ data Environment = Environment
 	} deriving (Show)
 
 $(makeLenses ''Environment)
+data Field = Clock Integer | Factor Double | Offset Integer | Sub Integer | Volume Double | Delay Integer | Sample Integer | Unmuted Bool | Effect Int Integer
+        deriving (Show,Read)
+setField :: Field -> Environment -> Environment
+setField (Clock i)  =  set clock i
+setField (Factor i)  =  set  factor i
+setField (Offset i)  =  set  offset i
+setField (Sub i)  =  set group i
+setField (Volume i)  =  set volume i
+setField (Delay i)  =  set delay i
+setField (Sample i)  =  set sample i
+setField (Unmuted i)  =  set unmuted i
+setField (Effect i x)  =  over effects (M.adjust (const $ fromIntegral x/1000) i)
 
+data Query = Query Int deriving (Show,Read)
 
 mkConfig :: Environment -> Config
 mkConfig (Environment cl fa ofs gr _ de _ _ _) = Config cl (seque (1 + fa * (fromIntegral gr - 1)) gr $ fromIntegral ofs) (de,gr)
 
 
-render :: Int ->  Environment -> (Time,Period) -> IO ()
-render c (Environment _ _ _ _ v de sa m ef) (t,dt) = when m $ playSample c sa (t + 0.2) 0.5 (4*v*dt) dt (ef) 3 1
+render :: Int ->  Environment -> (Time,Period,Period) -> IO ()
+render c (Environment _ _ _ _ v de sa m ef) (t,dt,dt') = when m $ playSample c sa (t + 0.2) 0.5 (4*v*dt') dt (ef) 3 1
 
 main = do
         t <- time
@@ -73,22 +85,47 @@ main = do
 	let cs = [c1,c2,c3,c4,c5,c6,c7,c8]
 	forM_ (zip [1..] cs) $ \(n,c) -> do
 		te' <- atomically $ dupTChan te
-		forkIO $ sequencer mkConfig n te' c
-
+		forkIO $ sequencer  n te' (mkConfig `fmap` readTVar c)
 	forkIO $ 	let l t = do
 				atomically $ writeTChan te (Event 0 t 2)
 				pauseThreadUntil t
 				l (t + 2)
 		  	in l t
 
-	
+	mj <- newTVarIO (M.fromList $ zip [1..8] $ repeat 0)
 	forkIO . forever $ do
 		Event j t dt <- atomically $ readTChan te
-		when (j > 0 && dt > 0.02) $ do 
+                dt' <- flip (M.!) j `fmap` atomically (readTVar mj)
+                atomically $ modifyTVar mj $ M.adjust (const dt) j
+		when (j > 0) $ do 
 			e <- atomically (readTVar $ cs !! (fromIntegral j - 1))
-			render (fromIntegral j - 1) e (t,dt)
+			render (fromIntegral j - 1) e (t,dt,dt')
 	midi cs
-	getLine
+        tk <- newTVarIO 0
+	let input = do
+                l <- getLine
+                case l of
+                        "end" -> return ()
+                        _ -> case reads l of
+                                [(i,_)] -> do 
+                                        atomically $ writeTVar tk $ i `mod` 8
+                                        input 
+                                        
+                                _ -> case reads l of
+                                        [(c,_)] -> do 
+                                                atomically $ do 
+                                                        i <- readTVar tk        
+                                                        modifyTVar (cs !! i) $ setField c
+                                                input
+                
+                                        _ -> case reads l of
+                                                [(Query j,_)] -> do 
+                                                        v <- atomically $ readTVar (cs !! j)
+                                                        print v
+                                                        input
+                                                _ ->  print "lost" >> input
+        input
+ 
 {-
 
 instance Binary Environment where
