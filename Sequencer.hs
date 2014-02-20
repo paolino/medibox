@@ -1,9 +1,8 @@
 {-# LANGUAGE TypeFamilies #-}
-
--- module Sequencer where
+module Sequencer where
 
 import Sound.OSC (Time,time,pauseThreadUntil)
-import Control.Monad (ap)
+import Control.Monad (ap, forM_ , forever)
 import Debug.Trace
 import Data.List
 import Control.Concurrent
@@ -24,40 +23,52 @@ type Beat = (Integer,Integer)
 fromBeat :: Period -> Beat -> Period 
 fromBeat q (n,k) = (fromIntegral n * q / fromIntegral k)
 
+newtype Sequencer = Sequencer ((Event -> IO ()) -> Config -> IO Sequencer)
+
 -- sequencer interface
 data Config = Config {
+		mask :: Integer,
 	       colpi :: [Beat] -- unsorted, finite
         ,	late :: Beat
-	,	window :: Event
 	}
 
 data Event = Event {
-        when :: Time
-        , dur :: Period
+	_index ::Integer
+        , _when :: Time
+        , _dur :: Period
         } deriving Show
 
--- make a sequencer from a concurrent sequencing environment
-sequencer :: Time -> Sequencer 
-sequencer = Sequencer . g where
-	g t f (Config cs l (Event t0 q)) = do
-		nq <- quantize t0 q
-		let     t' = head $ dropWhile (<=t) . sort $ (nq - q:nq + q:nq : map (((nq - q) +) . fromBeat q) cs)
-                        t'' = fromBeat q l + t
-		f  $ Event t'' (t' - t)
-		pauseThreadUntil t'
-		return . Sequencer $ g t' 
-
-adriver :: IO Config -> (Event -> IO ()) -> Time -> IO ()
-adriver ic f = loop . sequencer where
-                loop (Sequencer g) = ic >>= g f >>= loop
+sequencer :: (a -> Config) -> Integer -> TChan Event -> TVar a -> IO ()
+sequencer q j te tc = do
+	md <- atomically $ do
+		Event i w d <- readTChan te
+		Config m cs l <- q `fmap` readTVar tc
+		if i == m  then return $ Just (cs,l,w,d) else return Nothing
+	case md of 
+		Nothing -> sequencer q j te tc
+		Just (cs,l,w,d) -> do
+			let 	ts = zip cs $ (tail cs ++ [(1,1)])
+				es = map (\(c1,c2) -> Event j (w + fromBeat d l + fromBeat d c1) (fromBeat d c2 - fromBeat d c1)) ts
+			atomically $ mapM_ (writeTChan te) es
+			pauseThreadUntil $ w + d
+			sequencer q j te tc
+		
+	
         
-        
+{-
 main = do
         t <- time
-        c1 <- newTVarIO $ Config [(1,2),(1,4)] (0,1) (Event t 2)
-        c2 <- newTVarIO $ Config [(1,3),(2,3)] (0,1) (Event t 2)
-        forkIO $ adriver (atomically $ readTVar c2) print t
-        adriver (atomically $ readTVar c1) (\x -> atomically (modifyTVar c2 (\(Config cs l _) -> Config cs l x))) t
-
+	te <- newTChanIO 
+        c1 <- newTVarIO $ Config 0 [(0,1), (1,4),(1,2)] (0,1) 
+	te1 <- atomically $ dupTChan te
+        c2 <- newTVarIO $ Config 1 [(0,1), (1,3),(2,3)] (0,1) 
+	te2 <- atomically $ dupTChan te
+	atomically $ 	forM_ [0..15] $ \v -> writeTChan te (Event 0 (t + v * 2) 2)
+	forkIO . forever $ do
+		e <- atomically $ readTChan te
+		print e
+	forkIO $ sequencer 1 te1 c1
+	sequencer 2 te2 c1 
+-}
 
 
