@@ -1,15 +1,15 @@
 
-{-# LANGUAGE TypeFamilies, TemplateHaskell #-}
+{-# LANGUAGE TypeFamilies, TemplateHaskell, Rank2Types #-}
 
 -- module Sequencer where
 
 import Sound.OSC (Time,time,pauseThreadUntil)
-import Control.Monad (ap, forever, when,forM_, replicateM, forM)
+import Control.Monad (ap, forever, when,forM_, replicateM, forM, liftM2)
 import Debug.Trace
 import Control.Concurrent
 import Control.Concurrent.STM
 import qualified Data.Map as M
-
+import Control.Monad.Trans
 import Samples
 import Sequencer
 import MidiComm
@@ -18,209 +18,239 @@ import Control.Lens
 import Control.Lens.TH
 
 import Data.Binary
+import System.Console.Haskeline
 
-rythm n m = zipWith subtract `ap` tail $  map floor $ map (/ n) [0,fromIntegral m ..]
-seque n m k = takeWhile (\(x,y) -> x < y)  . map (flip (,) m) . scanl (+) 0 . drop (fromIntegral k) $ rythm n m
+seque k ls = case filter (>0) ls of
+		[] -> []
+		ls -> takeWhile (<1) $ scanl (+) 0 $ drop k $ cycle ls
 
-{-
-data Config = Config {
-	       colpi :: [Beat] -- unsorted, finite
-        ,	late :: Beat
-	,	window :: Event
+------------------- Clocked --------------------------
+
+data Dependence = None | Sync | Up Int deriving (Show,Read,Eq)
+instance Binary Dependence where
+	put None = put 'a'
+	put Sync = put 'b'
+	put (Up i) = put 'c' >> put i 	
+	get = get >>= \l -> case l of
+		'a' -> return None
+		'b' -> return Sync
+		'c' -> Up `fmap` get	 
+
+data Clocked a = Clocked 
+	{ 	_clock :: [Dependence]
+	,	_element :: a
 	}
-
-data Event = Event {
-        when :: Time
-        , dur :: Period
-        } deriving Show
--}
+        deriving (Show)
+	
+$(makeLenses ''Clocked)
 
 
-data Environment = Environment
-	{	_clock :: Integer
-	,	_factor :: Double
+instance Binary a => Binary (Clocked a) where
+	put (Clocked x y) = put x >> put y 
+	get = do  
+                x <- get
+		y <- get
+		return (Clocked x y)
+
+data ClockedField = Clock [Dependence] deriving (Show,Read)
+setClockedField (Clock i)  =  set clock i
+------------------------------------------------------
+
+---------------- Euclidean ------------------------------
+data Euclidean = Euclidean 
+	{	_factor :: [Double]
 	,	_offset :: Integer
 	,	_group :: Integer
-	,	_volume	:: Double
 	,	_delay :: Integer
+	}
+        deriving (Show)	
+$(makeLenses ''Euclidean)
+instance Binary Euclidean where
+	put (Euclidean x1 x2 x3 x4) = put x1 >> put x2 >> put x3 >> put x4  
+	get = do  
+                x1 <- get
+		x2 <- get
+		x3 <- get
+		x4 <- get
+		return (Euclidean x1 x2 x3 x4)
+
+data EuclideanField = Factor [Double] | Offset Integer | Sub Integer | Delay Integer 
+        deriving (Show,Read)
+setRythmField (Factor i)  =  set  (element . factor ) i
+setRythmField (Offset i)  =  set  (element . offset ) i
+setRythmField (Sub i)  =  set (element . group ) i
+setRythmField (Delay i)  =  set (element . delay ) i
+
+----------------------------------------------------
+
+---------------- Instrument -----------------------
+data Instrument = Instrument
+	{	_volume	:: Double
 	,	_sample :: Integer
 	,	_unmuted :: Bool 
 	,	_effects :: M.Map Int Double
 	} deriving (Show)
 
-$(makeLenses ''Environment)
-data Field = Clock Integer | Factor Double | Offset Integer | Sub Integer | Volume Double | Delay Integer | Sample Integer | Unmuted Bool | Effect Int Integer
+$(makeLenses ''Instrument)
+instance Binary Instrument where
+	put (Instrument x1 x2 x3 x4 ) = put x1 >> put x2 >> put x3 >> put x4 	
+	get = do  
+                x1 <- get
+		x2 <- get
+		x3 <- get
+		x4 <- get	
+		return (Instrument x1 x2 x3 x4)
+
+data InstrumentFieled =  Volume Double | Sample Integer | Unmuted Bool | Effect Int Integer
         deriving (Show,Read)
-setField :: Field -> Environment -> Environment
-setField (Clock i)  =  set clock i
-setField (Factor i)  =  set  factor i
-setField (Offset i)  =  set  offset i
-setField (Sub i)  =  set group i
-setField (Volume i)  =  set volume i
-setField (Delay i)  =  set delay i
-setField (Sample i)  =  set sample i
-setField (Unmuted i)  =  set unmuted i
-setField (Effect i x)  =  over effects (M.adjust (const $ fromIntegral x/1000) i)
+setInstrField (Volume i)  =  set (element . volume ) i
+setInstrField (Sample i)  =  set (element . sample ) i
+setInstrField (Unmuted i)  =  set (element . unmuted ) i
+setInstrField (Effect i x)  =  over (element . effects ) (M.adjust (const $ fromIntegral x/1000) i)
 
-data Query = Query Int deriving (Show,Read)
-
-mkConfig :: Environment -> Config
-mkConfig (Environment cl fa ofs gr _ de _ _ _) = Config cl (seque (1 + fa * (fromIntegral gr - 1)) gr $ fromIntegral ofs) (de,gr)
+----------------------------------------------------
 
 
-render :: Int ->  Environment -> (Time,Period,Period) -> IO ()
-render c (Environment _ _ _ _ v de sa m ef) (t,dt,dt') = when m $ playSample c sa (t + 0.2) 0.5 (4*v*dt') dt (ef) 3 1
+data Select = Rythm Int | Instr Int  deriving (Show,Read)
 
+
+mkConfig :: [Dependence] -> Clocked Euclidean -> (Config Dependence,[Dependence])
+mkConfig [] (Clocked [] x) = (Config None [] (0,1),[])
+mkConfig [] (Clocked cl x) = mkConfig cl (Clocked cl x)
+mkConfig (cl:cls) (Clocked _ (Euclidean fa ofs gr de)) = (Config cl (map (flip (,) gr . floor . (* fromIntegral gr)) $ seque (fromIntegral ofs) fa) (de,gr),cls)
+
+
+
+render :: Int ->  Instrument -> (Time,Period,Period) -> IO ()
+render c (Instrument v sa m ef) (t,dt,dt') = when m $ playSample c sa (t + 0.2) 0.5 (4*v*dt') dt (ef) 3 1
+
+ntrack = 32
+data Global = Solo 
 main = do
         t <- time
-	te <- newTChanIO 
-        c1 <- newTVarIO $ (Environment 0 0 0 4 0.5 0 50 True $ M.fromList $ zip [0..] $ replicate 24 0)
-        c2 <- newTVarIO $ (Environment 1 0 0 4 0.5 0 50 True $ M.fromList $ zip [0..] $ replicate 24 0)
-        c3 <- newTVarIO $ (Environment 2 0 0 4 0.5 0 50 True $ M.fromList $ zip [0..] $ replicate 24 0)
-        c4 <- newTVarIO $ (Environment 3 0 0 4 0.5 0 50 True $ M.fromList $ zip [0..] $ replicate 24 0)
-        c5 <- newTVarIO $ (Environment 4 0 0 4 0.5 0 50 True $ M.fromList $ zip [0..] $ replicate 24 0)
-        c6 <- newTVarIO $ (Environment 5 0 0 4 0.5 0 50 True $ M.fromList $ zip [0..] $ replicate 24 0)
-        c7 <- newTVarIO $ (Environment 6 0 0 4 0.5 0 50 True $ M.fromList $ zip [0..] $ replicate 24 0)
-        c8 <- newTVarIO $ (Environment 7 0 0 4 0.5 0 50 True $ M.fromList $ zip [0..] $ replicate 24 0)
-	let cs = [c1,c2,c3,c4,c5,c6,c7,c8]
-	forM_ (zip [1..] cs) $ \(n,c) -> do
-		te' <- atomically $ dupTChan te
-		forkIO $ sequencer  n te' (mkConfig `fmap` readTVar c)
+	te <- newTChanIO  :: IO (TChan (Event Dependence))
+	(cs',es') <- decodeFile "current.bb"
+	cs <- mapM newTVarIO cs'
+	es <- mapM newTVarIO es'
+	count <- newTVarIO 0
+		
+	-- cs <- forM [0..ntrack - 1] $ \_ -> newTVarIO $ (Clocked [] $ Euclidean [] 0 4 0)
+	-- es <- forM [0..ntrack - 1] $ \_ -> newTVarIO (Clocked [] $ Instrument 0.5 50 True $ M.fromList $ zip [0..] $ replicate 24 0)
+
+	-- master tempo (2 sec)
 	forkIO $ 	let l t = do
-				atomically $ writeTChan te (Event 0 t 2)
+				atomically $ do 
+					writeTChan te (Event Sync t 2)
+					modifyTVar count (+1)
 				pauseThreadUntil t
 				l (t + 2)
 		  	in l t
 
-	mj <- newTVarIO (M.fromList $ zip [1..8] $ repeat 0)
+	-- euclidean replicators
+	
+	mj <- newTVarIO (M.fromList $ zip [0..ntrack - 1] $ repeat []) :: IO (TVar (M.Map  Int [Dependence]))
+	forM_ (zip [0..] cs) $ \(n,c) -> do
+		te' <- atomically $ dupTChan te
+		let act :: STM (Config Dependence)
+		    act = do
+			rs <- flip (M.!) n `fmap`   readTVar mj
+			(z,rs') <- mkConfig rs `fmap` readTVar c :: STM (Config Dependence,[Dependence])
+			modifyTVar mj $ M.adjust (\_ -> rs') n
+			return z
+		forkIO $ sequencer (Up n) te' act 
+
+        -- players
+	mj' <- newTVarIO (M.fromList $ zip [0..ntrack - 1] $ repeat 0) -- remember last dt
 	forkIO . forever $ do
 		Event j t dt <- atomically $ readTChan te
-                dt' <- flip (M.!) j `fmap` atomically (readTVar mj)
-                atomically $ modifyTVar mj $ M.adjust (const dt) j
-		when (j > 0) $ do 
-			e <- atomically (readTVar $ cs !! (fromIntegral j - 1))
-			render (fromIntegral j - 1) e (t,dt,dt')
-	midi cs
-        tk <- newTVarIO 0
+		forM_ (zip [0..] es) $ \(i,te) -> do
+                                e <- atomically $ readTVar te
+                                when (e ^. clock == [j]) $ do
+                                        dt' <- flip (M.!) i `fmap` atomically (readTVar mj')
+                                        atomically $ modifyTVar mj' $ M.adjust (const dt) i
+                                        render (fromIntegral i) (e ^. element) (t,dt,dt')
+        
+
+                                                
+	-------------- interface -----------------------
+
+	ti <- newTVarIO $ 0
+	tr <- newTVarIO $ 0
+	trd <- newTVarIO $ 0
+	tl <- newTVarIO $ Rythm 0
+
+	tcsel <- newTChanIO
+	midi cs es ti tr tcsel
+
 	let input = do
-                l <- getLine
+                Just l <- getInputLine "> "
                 case l of
                         "end" -> return ()
-                        _ -> case reads l of
-                                [(i,_)] -> do 
-                                        atomically $ writeTVar tk $ i `mod` 8
-                                        input 
-                                        
-                                _ -> case reads l of
-                                        [(c,_)] -> do 
-                                                atomically $ do 
-                                                        i <- readTVar tk        
-                                                        modifyTVar (cs !! i) $ setField c
-                                                input
-                
-                                        _ -> case reads l of
-                                                [(Query j,_)] -> do 
-                                                        v <- atomically $ readTVar (cs !! j)
-                                                        print v
-                                                        input
-                                                _ ->  print "lost" >> input
-        input
- 
-{-
+			_ -> do 
+				liftIO $ case reads l of
+					[(Rythm i,_)] -> do 
+						atomically $ writeTVar tr $  i `mod` ntrack
+						atomically $ writeTVar tl (Rythm $ i `mod` ntrack)
+						atomically $ writeTChan tcsel (Rythm $ i `mod` ntrack)
+						(atomically $ readTVar $ cs !! i) >>= print 
+					[(Instr i,_)] -> do 
+						atomically $ writeTVar ti $  i `mod` ntrack
+						atomically $ writeTVar tl (Instr $ i `mod` ntrack)
+						atomically $ writeTChan tcsel (Instr $ i `mod` ntrack)
+						(atomically $ readTVar $ es !! i) >>= print 
 
-instance Binary Environment where
-	put (Environment sh o p co x m y) = put sh >> put o >> put p >> put co >> put x >> put m >>put y
-	get = do  
-                sh <- get
-		o <- get
-		p <- get
-		co <- get
-		x <- get
-		m <- get
-		y <- get
-	
-		return (Environment sh o p co x m y)
+					_ -> case reads l of
+						[(c ,_)] -> do 
+							atomically $ do 
+								i <- readTVar tl
+								case i of 
+									Rythm i -> modifyTVar (cs !! i) $ setClockedField c
+									Instr i -> modifyTVar (es !! i) $ setClockedField c
 
-main = do	
-  	ws <- decodeFile "current.bb"
-	se <- forM ws $ newTVarIO
-	-- se <- replicateM 8 $ newTVarIO (Environment (RaffineParams 7 0 12 $ rythm 7 12) 0 4 0 0 False $ M.fromList $ zip [0..] $ replicate 24 0)
-	tap <- newTVarIO (3,1)
-	let 	loop :: Int  -> TVar Environment -> Sequencer Raffine1 -> IO ()
-		loop c s (Sequencer f) = f (affineseq c tap s) >>= loop c s
-	forM_ (zip [0 ..] se) $ \(c,s) -> forkIO $ loop c s $  sequencer affinestep (Feedback (RaffineParams 7 0 12 $ rythm 7 12) (rythm 7 12) (0,1) 1)
-	getLine
-	ws <- atomically $ mapM readTVar se
+						_ -> case reads l of
+							[(c,_)] -> do 
+								i <- atomically $ do 
+									i <- readTVar tr      
+									modifyTVar (cs !! i) $ setRythmField c
+									return i
+								(atomically $ readTVar $ cs !! i) >>= print 
+							_ -> case reads l of
+								[(c,_)] -> do 
+									i <-  atomically $ do 
+										i <- readTVar ti
+										modifyTVar (es !! i) $ setInstrField c
+										return i
+									(atomically $ readTVar $ es !! i) >>= print 
+								_ ->  putStrLn "<< parsing failed >>" 
+				input
+        runInputT defaultSettings input
+
+	---------------- save work -------------------
+ 	cs' <- atomically $ mapM readTVar cs
+ 	es' <- atomically $ mapM readTVar es
 		
- 	encodeFile "current.bb" ws
+ 	encodeFile "current.bb" (cs',es')
+
 
 	
-
-
--}
-
-midi se = 	do
-	mc <- newTChanIO 
-	forkIO $ midiIn "samples" 0 mc
-	mcf <- newTChanIO 
-	forkIO $ midiIn "samples_effect" 1 mcf
-
-
-	fbinst <- newTChanIO
-	
-	tfbp <- newTChanIO 
-  	forkIO $ midiOutNP ("samples_effect") 1 tfbp
+midi :: [TVar (Clocked Euclidean)] -> [TVar (Clocked Instrument)] -> TVar Int  -> TVar Int -> TChan Select -> IO () 
+midi cs es ti tr fbsel = 	do
+	mci <- midiIn "euclidean" 0 
+	mco <- midiOut ("euclidean") 0 
 	forkIO . forever .atomically $ do
-		y <-  readTChan fbinst
-		ps <- readTVar $ se !! y
-		forM_ (M.assocs $ ps ^. effects) $ \(p,v) -> writeTChan tfbp (p,floor (v * 1000))
-					
-	tfbp2 <- newTChanIO 
-	fbinst2 <- atomically $ dupTChan fbinst
-  	forkIO $ midiOutNPx ("samples") 0 tfbp2
-	forkIO . forever .atomically $ do
-		y <-  readTChan fbinst2
-		e@(Environment d fa ofs gr v de sa m ef) <- readTVar (se !! y)
-		writeTChan tfbp2 (24, floor $ v * 128,False)
-		writeTChan tfbp2 (31, fromIntegral sa,True )
-		writeTChan tfbp2 (25, fromIntegral de, False)
-		writeTChan tfbp2 (26, fromIntegral $ ofs,False)
-		writeTChan tfbp2 (27, fromIntegral $ floor (fa*128),False)
-		writeTChan tfbp2 (28, fromIntegral $ gr,False)
-		writeTChan tfbp2 (29, fromIntegral $ d,False)
-
-	inst <- newTVarIO 0
-	forkIO . forever . atomically $ do
-				(n,s) <- readTChan mc
-				y <- readTVar inst
-				case n of 
-					127 -> do 
-						writeTVar inst $ fromIntegral s
-						writeTChan fbinst $ fromIntegral s	
-					24 -> modifyTVar (se !! y) $ volume .~ fromIntegral s/128
-					29 -> modifyTVar (se !! y) $ clock .~ (if s <= y then fromIntegral s else 0) 
-					31 -> modifyTVar (se !! y) $ sample .~ fromIntegral s
-					25 -> modifyTVar (se !! y) $ delay .~ fromIntegral s
-					26 -> modifyTVar (se !! y) $ offset .~ fromIntegral s
-					27 -> modifyTVar (se !! y) $ factor .~ (fromIntegral s/128)
-					28 -> modifyTVar (se !! y) $ group .~ (fromIntegral s)
-					_ -> when (n >= 112 && n <=119) $ case s of
-						127 -> do 
-							modifyTVar (se !! (n - 112)) $ unmuted .~ True
-							writeTVar inst $ fromIntegral (n - 112)
-							writeTChan fbinst $ fromIntegral (n - 112)	
-						0 -> modifyTVar (se !! (n -112)) $ unmuted .~ False
-
-					
-	forkIO . forever . atomically $ do
-				(n,s) <- readTChan mcf
-				y <- readTVar inst
-				modifyTVar (se !! y) $ effects  %~ (flip M.adjust n $ \_ ->  fromIntegral s/1000)
- 	threadDelay 1000000	
-	atomically $ writeTChan fbinst $ 0
-	forM_ (zip [0..] se) $ \(n,se) -> do
-		s <- atomically $ readTVar se	
-		case s ^. unmuted of
-			True -> atomically $ writeTChan tfbp2 (n + 112,127, False)
-			False -> atomically $ writeTChan tfbp2 (n+ 112,0, False)
-
+		y <-  readTChan fbsel
+		case y of 
+			Instr _ -> return ()
+			Rythm y -> do 
+				ce <- readTVar $ cs !! y
+				forM_ (zip [0..7] (ce ^. element . factor)) $ \(p,v) -> writeTChan mco (p,floor (v * 128),False)
+				
+        forkIO . forever $ do
+		y <- atomically $ do
+			(n,s) <- readTChan mci
+			y <- readTVar tr
+			modifyTVar (cs !! y) $ (element . factor %~  
+				M.elems . M.adjust (const $ fromIntegral s /128) n . M.fromList . zip [0..7] . (++ repeat 0))
+			return y
+		(atomically $ readTVar $ cs !! y) >>= print 
+	return ()

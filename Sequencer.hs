@@ -24,14 +24,14 @@ fromBeat q (n,k) = (fromIntegral n * q / fromIntegral k)
 
 
 -- sequencer interface
-data Config = Config {
-		mask :: Integer, -- which producer to sync
+data Config a = Config {
+		mask :: a, -- which producer to sync
 	        colpi :: [Beat]  -- sorted, finite timing for response
         ,	late :: Beat     -- initial delay
 	}
 
-data Event = Event 
-        {       _index ::Integer        -- producer
+data Event a = Event 
+        {       _index :: a        -- producer
         ,       _when :: Time           -- timestamp
         ,       _dur :: Period          -- duration
         } deriving Show
@@ -39,9 +39,10 @@ data Event = Event
 
 
 sequencer 
-        :: Integer     -- sequencer index
-        -> TChan Event -- duplex even channel to peek and poke
-        -> STM Config  -- a live config
+        :: Eq a 
+	=> a     -- sequencer index
+        -> TChan (Event a) -- duplex even channel to peek and poke
+        -> STM (Config a) -- a live config
         -> IO ()       -- loop forever 
 sequencer j te tc = do
 	md <- atomically $ do

@@ -5,6 +5,8 @@
 module Samples where
 
 import Control.Monad (forM_,when)
+import Control.Concurrent
+import Control.Concurrent.STM
 
 import Sound.OSC
 import Sound.SC3 hiding (pitch)
@@ -48,7 +50,7 @@ bootSample j (n,fp) = do
         withSC3n j . send $ d_recv . synthdef (show $ n `div` 2) . out 0  $  
 		(envGen KR 1 1 0 1 RemoveSynth (envPerc' (fckr 0 15 / 10) (control KR "rel" 0.1 - fckr 0 15/ 10) 1.0 (EnvNum 1, EnvNum 1)) *  (control KR "amp" 0) * (orig' + (sum $ map orig'' [0..2])))
 	where 	
-		orig' =  (control KR "23" 0) * playBuf 2 AR (fromIntegral n) (0.5 + 1.5 * control KR "pitch" 0) 1 0 NoLoop DoNothing 
+		orig' =  (1 - control KR "23" 0) * playBuf 2 AR (fromIntegral n) (0.5 + 1.5 * control KR "pitch" 0) 1 0 NoLoop DoNothing 
 		{-
 		orig = 0.33 * sum [
 			bPeakEQ (orig'')
@@ -90,13 +92,14 @@ initSamples globs = do
         forM_ servers $ \i -> withSC3n i . send $ p_new [(1, AddToTail, 0)]
         ls <- sort `fmap` namesMatching globs
 	t <- time
-        sequence_ $ do 
-                j <- servers
-                l@(i,_) <- zip [0,2 ..] ls
-                return $  do 	
-			bootSample j l
+	count <- newTVarIO 0
+        ts <- forM servers $ \j -> forkIO $ do 
+                forM_ (zip [0,2 ..] ls) $ bootSample j 
+		atomically $ modifyTVar count (+1)
 			-- playSample 0 i (t + 3 + fromIntegral i * 0.005) 0.5 0.1 (0.005) []
-	
+	atomically $ do
+		c <- readTVar count
+		if c < length servers then retry else return ()
 	return ls
 
 			
