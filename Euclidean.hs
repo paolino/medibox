@@ -55,13 +55,6 @@ main = do
         t <- time
 	te <- newTChanIO  :: IO (TChan (Event Dependence))
 	-- (cs',es') <- decodeFile "current.bb"
-        let pa0 = Object (
-	graph <- newTVarIO $ flip insert empty $ Graph (M.fromList $ 
-		[ (0,(Affine (0.5,0.5) (0.1,0.06),basePattern))
-		, (1,(Affine (0.5,0.5) (0.06,0.1),baseSound))
-		, (2,(Affine (0.5,0.5) (0.06,0.06),baseGenerator))
-		]) M.empty M.empty
-
         	
 	-- master tempo 
 	forkIO . forever $ do
