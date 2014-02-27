@@ -11,7 +11,7 @@ import Control.Concurrent.STM
 import qualified Data.Map as M
 import Control.Monad.Trans
 import Samples
-import Sequencer
+-- import Sequencer
 import MidiComm
 
 import Control.Lens
@@ -20,168 +20,53 @@ import Control.Lens.TH
 import Data.Binary
 import System.Console.Haskeline
 import Data.List.Zipper
-
-seque k ls = case filter (>0) ls of
-		[] -> []
-		ls -> takeWhile (<1) $ scanl (+) 0 $ drop k $ cycle ls
-
-------------------- Clocked --------------------------
-
-data Dependence = None | Sync | Up Int deriving (Show,Read,Eq)
-instance Binary Dependence where
-	put None = put 'a'
-	put Sync = put 'b'
-	put (Up i) = put 'c' >> put i 	
-	get = get >>= \l -> case l of
-		'a' -> return None
-		'b' -> return Sync
-		'c' -> Up `fmap` get	 
-
-data Clocked a = Clocked 
-	{ 	_clock :: [Dependence]
-	,	_element :: a
-	}
-        deriving (Show)
-	
-$(makeLenses ''Clocked)
-
-
-instance Binary a => Binary (Clocked a) where
-	put (Clocked x y) = put x >> put y 
-	get = do  
-                x <- get
-		y <- get
-		return (Clocked x y)
-
-data ClockedField = Clock [Dependence] deriving (Show,Read)
-setClockedField (Clock i)  =  set clock i
-------------------------------------------------------
-
----------------- Euclidean ------------------------------
-data Euclidean = Euclidean 
-	{	_factor :: [Double]
-	,	_offset :: Integer
-	,	_group :: Integer
-	,	_delay :: Integer
-	}
-        deriving (Show)	
-$(makeLenses ''Euclidean)
-instance Binary Euclidean where
-	put (Euclidean x1 x2 x3 x4) = put x1 >> put x2 >> put x3 >> put x4  
-	get = do  
-                x1 <- get
-		x2 <- get
-		x3 <- get
-		x4 <- get
-		return (Euclidean x1 x2 x3 x4)
-
-data EuclideanField = Factor [Double] | Offset Integer | Sub Integer | Delay Integer 
-        deriving (Show,Read)
-setRythmField (Factor i)  =  set  (element . factor ) i
-setRythmField (Offset i)  =  set  (element . offset ) i
-setRythmField (Sub i)  =  set (element . group ) i
-setRythmField (Delay i)  =  set (element . delay ) i
-
-----------------------------------------------------
-
----------------- Instrument -----------------------
-data Instrument = Instrument
-	{	_volume	:: Double
-	,	_sample :: Integer
-	,	_unmuted :: Bool 
-	,	_effects :: M.Map Int Double
-	} deriving (Show)
-
-$(makeLenses ''Instrument)
-instance Binary Instrument where
-	put (Instrument x1 x2 x3 x4 ) = put x1 >> put x2 >> put x3 >> put x4 	
-	get = do  
-                x1 <- get
-		x2 <- get
-		x3 <- get
-		x4 <- get	
-		return (Instrument x1 x2 x3 x4)
-
-data InstrumentFieled =  Volume Double | Sample Integer | Unmuted Bool | Effect Int Integer
-        deriving (Show,Read)
-setInstrField (Volume i)  =  set (element . volume ) i
-setInstrField (Sample i)  =  set (element . sample ) i
-setInstrField (Unmuted i)  =  set (element . unmuted ) i
-setInstrField (Effect i x)  =  over (element . effects ) (M.adjust (const $ fromIntegral x/1000) i)
-
-----------------------------------------------------
-
+import EuclideanData
 
 data Select = Rythm Int | Instr Int  deriving (Show,Read)
 
+mkConfig :: Euclidean -> ([Beat],Beat)
+mkConfig (Euclidean fa ofs gr de) = (map (flip (,) gr . floor . (* fromIntegral gr)) $ seque (fromIntegral ofs) fa, (de,gr))
 
-mkConfig :: [Dependence] -> Clocked Euclidean -> (Config Dependence,[Dependence])
-mkConfig [] (Clocked [] x) = (Config None [] (0,1),[])
-mkConfig [] (Clocked cl x) = mkConfig cl (Clocked cl x)
-mkConfig (cl:cls) (Clocked _ (Euclidean fa ofs gr de)) = (Config cl (map (flip (,) gr . floor . (* fromIntegral gr)) $ seque (fromIntegral ofs) fa) (de,gr),cls)
-
+			let 	ts = zip cs $ (tail cs ++ [(1,1)])
+				es = map (\(c1,c2) -> Event j (w + fromBeat d l + fromBeat d c1) (fromBeat d c2 - fromBeat d c1)) ts
 
 
 render :: Int ->  Instrument -> (Time,Period,Period) -> IO ()
 render c (Instrument v sa m ef) (t,dt,dt') = when m $ playSample c sa (t + 0.2) 0.5 (4*v*dt') dt (ef) 3 1
 
-ntrack = 32
 
+quant :: Time -> Time -> Time
+quant pe dt =  fromIntegral . ceiling $ (dt - t0)/pe) * pe
 
-data F = Pattern (Clocked Euclidean) | Sound  (Clocked Intrument)
+selectGenerator :: M.Map Int F -> (Int,Time,Time)
+selectGenerator t0 m = head . sort . catMaybes . map k $ M.assocs m where
+        k (i,Generator t) = Just (i,t,quant t t0)
+        k _ = Nothing
 
-renderSynth :: Object F -> IO ()
-renderSynth (Object is os (Pattern _))  = do
-			polygonSmooth $= Enabled
-			color (Color4 0.8 0.9 1 0.1:: Color4 GLfloat)
-			renderPrimitive Quads $ do
-                                vertex (Vertex2 0.1 0 :: Vertex2 GLfloat)
-                                vertex (Vertex2 0.9 0 :: Vertex2 GLfloat)
-                                vertex (Vertex2 0.9 1 :: Vertex2 GLfloat)
-                                vertex (Vertex2 0.1 1 :: Vertex2 GLfloat)
-			renderPrimitive Quads $ do
-                                vertex (Vertex2 0 0.1 :: Vertex2 GLfloat)
-                                vertex (Vertex2 1 0.1 :: Vertex2 GLfloat)
-                                vertex (Vertex2 1 0.9 :: Vertex2 GLfloat)
-                                vertex (Vertex2 0 0.9 :: Vertex2 GLfloat)
-renderSynth (Object is os (Sound _))  = do
-			polygonSmooth $= Enabled
-			color (Color4 1 0.9 1 0.8:: Color4 GLfloat)
-			renderPrimitive Quads $ do
-                                vertex (Vertex2 0.1 0 :: Vertex2 GLfloat)
-                                vertex (Vertex2 0.9 0 :: Vertex2 GLfloat)
-                                vertex (Vertex2 0.9 1 :: Vertex2 GLfloat)
-                                vertex (Vertex2 0.1 1 :: Vertex2 GLfloat)
-			renderPrimitive Quads $ do
-                                vertex (Vertex2 0 0.1 :: Vertex2 GLfloat)
-                                vertex (Vertex2 1 0.1 :: Vertex2 GLfloat)
-                                vertex (Vertex2 1 0.9 :: Vertex2 GLfloat)
-                                vertex (Vertex2 0 0.9 :: Vertex2 GLfloat)
+effes :: Zipper (Graph F) -> M.Map Int F
+effes zg = fmap (view $ _2 . object) $ cursor zg ^. vertexes
 
-	
+nextTick :: Zipper (Graph F) -> IO (Event Int)
+nextTick g = let 
+        (i,dt,t) = selectGenerator (effes g)
+        in pauseThreadUntil t >> return (Event i t dt)
+
 main = do
         t <- time
 	te <- newTChanIO  :: IO (TChan (Event Dependence))
 	-- (cs',es') <- decodeFile "current.bb"
-
+        let pa0 = Object (
 	graph <- newTVarIO $ flip insert empty $ Graph (M.fromList $ 
-		[ (0,(Affine (0.5,0.5) (0.1,0.06),Object Pattern (Euclidean [] 0 4 0)))
-		, (1,(Affine (0.5,0.5) (0.06,0.1),Object Sound (Instrument 0.5 50 True $ M.fromList $ zip [0..] $ replicate 24 0)))
+		[ (0,(Affine (0.5,0.5) (0.1,0.06),basePattern))
+		, (1,(Affine (0.5,0.5) (0.06,0.1),baseSound))
+		, (2,(Affine (0.5,0.5) (0.06,0.06),baseGenerator))
 		]) M.empty M.empty
 
-		
-	-- cs <- forM [0..ntrack - 1] $ \_ -> newTVarIO $ (Clocked [] $ Euclidean [] 0 4 0)
-	-- es <- forM [0..ntrack - 1] $ \_ -> newTVarIO (Clocked [] $ Instrument 0.5 50 True $ M.fromList $ zip [0..] $ replicate 24 0)
-
-	-- master tempo (2 sec)
-	count <- newTVarIO 0
-	forkIO $ 	let l t = do
-				atomically $ do 
-					writeTChan te (Event Sync t 2)
-					modifyTVar count (+1)
-				pauseThreadUntil t
-				l (t + 2)
-		  	in l t
+        	
+	-- master tempo 
+	forkIO . forever $ do
+                e <- atomically (readTVar graph) >>= nextTick
+                atomically $ writeTChan te e
 
 	-- euclidean replicators
 	
@@ -198,8 +83,19 @@ main = do
 
         -- players
 	mj' <- newTVarIO (M.fromList $ zip [0..ntrack - 1] $ repeat 0) -- remember last dt
-	forkIO . forever $ do
-		Event j t dt <- atomically $ readTChan te
+	let loop m = do
+		Event j t dt <- readTChan te
+                g <- fmap cursor $ readTVar graph
+                let     rit m (i,Sound e)   = let
+                                dt' = maybe 0 $ M.lookup i m
+                                m' = M.insert i dt m
+                                cb =  do
+                                        pauseThreadUntil t 
+                                        render i e  (t,dt,dt')
+
+                        rit m (i,Patern e) = 
+                                        
+                        (m',cbs) = mapAccumL rit m 
 		forM_ (zip [0..] es) $ \(i,te) -> do
                                 e <- atomically $ readTVar te
                                 when (e ^. clock == [j]) $ do

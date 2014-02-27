@@ -13,11 +13,11 @@ type Period = Time
 
 -- find next beat from 0 time
 quantizeM :: Time -> Period -> IO Time
-quantizeM t0 pe = (t0 +) `fmap`  quantize pe `fmap` time
+quantizeM t0 pe = (t0 +) `fmap`  quantize t0 pe `fmap` time
 
 
-quantize :: Time -> Time -> Time 
-quantize pe dt =  (fromIntegral . ceiling $ (dt - t0)/pe) * pe
+quantize :: Time -> Time -> Time  -> Time
+quantize t0 pe dt =  (fromIntegral . ceiling $ (dt - t0)/pe) * pe
 
 -- fraction of a measure
 type Beat = (Integer,Integer)
@@ -43,7 +43,7 @@ data Event a = Event
 mkEvents :: Time -> Time -> a -> Config -> [Event a]
 mkEvents w d j (Config cs l) = let 	
         ts = zip cs $ (tail cs ++ [(1,1)])
-	es = map (\(c1,c2) -> Event j (w + fromBeat d l + fromBeat d c1) (fromBeat d c2 - fromBeat d c1)) ts
+	in map (\(c1,c2) -> Event j (w + fromBeat d l + fromBeat d c1) (fromBeat d c2 - fromBeat d c1)) ts
 
 	
         
