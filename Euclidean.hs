@@ -158,6 +158,14 @@ renderSynth (Object is os (Sound _))  = do
                                 vertex (Vertex2 1 0.9 :: Vertex2 GLfloat)
                                 vertex (Vertex2 0 0.9 :: Vertex2 GLfloat)
 
+basePattern  = Object 
+		(M.singleton 0 (SInput (-0.1,0.5) (0.5,0.5) ["pattern"]))
+		(M.singleton 0 (SOutput (1.1,0.5) (0.5,0.5) "pattern" ))
+		(Pattern $  (Euclidean [] 0 4 0))
+baseSound  = Object 
+		(M.singleton 0 (SInput (-0.1,0.5) (0.5,0.5) ["pattern"]))
+		M.empty
+		(Pattern $  Instrument 0.5 50 True $ M.fromList $ zip [0..] $ replicate 24 0)
 	
 main = do
         t <- time
@@ -165,8 +173,8 @@ main = do
 	-- (cs',es') <- decodeFile "current.bb"
 
 	graph <- newTVarIO $ flip insert empty $ Graph (M.fromList $ 
-		[ (0,(Affine (0.5,0.5) (0.1,0.06),Object Pattern (Euclidean [] 0 4 0)))
-		, (1,(Affine (0.5,0.5) (0.06,0.1),Object Sound (Instrument 0.5 50 True $ M.fromList $ zip [0..] $ replicate 24 0)))
+		[ (0,(Affine (0.5,0.5) (0.1,0.06),basePattern)
+		, (1,(Affine (0.5,0.5) (0.06,0.1),baseSound ))
 		]) M.empty M.empty
 
 		
