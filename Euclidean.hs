@@ -19,6 +19,7 @@ import Control.Lens.TH
 
 import Data.Binary
 import System.Console.Haskeline
+import Data.List.Zipper
 
 seque k ls = case filter (>0) ls of
 		[] -> []
@@ -125,19 +126,55 @@ render :: Int ->  Instrument -> (Time,Period,Period) -> IO ()
 render c (Instrument v sa m ef) (t,dt,dt') = when m $ playSample c sa (t + 0.2) 0.5 (4*v*dt') dt (ef) 3 1
 
 ntrack = 32
-data Global = Solo 
+
+
+data F = Pattern (Clocked Euclidean) | Sound  (Clocked Intrument)
+
+renderSynth :: Object F -> IO ()
+renderSynth (Object is os (Pattern _))  = do
+			polygonSmooth $= Enabled
+			color (Color4 0.8 0.9 1 0.1:: Color4 GLfloat)
+			renderPrimitive Quads $ do
+                                vertex (Vertex2 0.1 0 :: Vertex2 GLfloat)
+                                vertex (Vertex2 0.9 0 :: Vertex2 GLfloat)
+                                vertex (Vertex2 0.9 1 :: Vertex2 GLfloat)
+                                vertex (Vertex2 0.1 1 :: Vertex2 GLfloat)
+			renderPrimitive Quads $ do
+                                vertex (Vertex2 0 0.1 :: Vertex2 GLfloat)
+                                vertex (Vertex2 1 0.1 :: Vertex2 GLfloat)
+                                vertex (Vertex2 1 0.9 :: Vertex2 GLfloat)
+                                vertex (Vertex2 0 0.9 :: Vertex2 GLfloat)
+renderSynth (Object is os (Sound _))  = do
+			polygonSmooth $= Enabled
+			color (Color4 1 0.9 1 0.8:: Color4 GLfloat)
+			renderPrimitive Quads $ do
+                                vertex (Vertex2 0.1 0 :: Vertex2 GLfloat)
+                                vertex (Vertex2 0.9 0 :: Vertex2 GLfloat)
+                                vertex (Vertex2 0.9 1 :: Vertex2 GLfloat)
+                                vertex (Vertex2 0.1 1 :: Vertex2 GLfloat)
+			renderPrimitive Quads $ do
+                                vertex (Vertex2 0 0.1 :: Vertex2 GLfloat)
+                                vertex (Vertex2 1 0.1 :: Vertex2 GLfloat)
+                                vertex (Vertex2 1 0.9 :: Vertex2 GLfloat)
+                                vertex (Vertex2 0 0.9 :: Vertex2 GLfloat)
+
+	
 main = do
         t <- time
 	te <- newTChanIO  :: IO (TChan (Event Dependence))
-	(cs',es') <- decodeFile "current.bb"
-	cs <- mapM newTVarIO cs'
-	es <- mapM newTVarIO es'
-	count <- newTVarIO 0
+	-- (cs',es') <- decodeFile "current.bb"
+
+	graph <- newTVarIO $ flip insert empty $ Graph (M.fromList $ 
+		[ (0,(Affine (0.5,0.5) (0.1,0.06),Object Pattern (Euclidean [] 0 4 0)))
+		, (1,(Affine (0.5,0.5) (0.06,0.1),Object Sound (Instrument 0.5 50 True $ M.fromList $ zip [0..] $ replicate 24 0)))
+		]) M.empty M.empty
+
 		
 	-- cs <- forM [0..ntrack - 1] $ \_ -> newTVarIO $ (Clocked [] $ Euclidean [] 0 4 0)
 	-- es <- forM [0..ntrack - 1] $ \_ -> newTVarIO (Clocked [] $ Instrument 0.5 50 True $ M.fromList $ zip [0..] $ replicate 24 0)
 
 	-- master tempo (2 sec)
+	count <- newTVarIO 0
 	forkIO $ 	let l t = do
 				atomically $ do 
 					writeTChan te (Event Sync t 2)
@@ -223,6 +260,7 @@ main = do
 									(atomically $ readTVar $ es !! i) >>= print 
 								_ ->  putStrLn "<< parsing failed >>" 
 				input
+	forkIO $ run (const return) (\_ _ -> return) renderSynth 
         runInputT defaultSettings input
 
 	---------------- save work -------------------
