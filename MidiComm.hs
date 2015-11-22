@@ -1,5 +1,5 @@
 {-# LANGUAGE ViewPatterns, TemplateHaskell #-}
-module MidiComm where
+-- module MidiComm where
 
 
 import Prelude hiding (show)
@@ -9,6 +9,7 @@ import Sound.ALSA.Sequencer.Client
 import Sound.ALSA.Sequencer.Port
 import Sound.ALSA.Sequencer.Event hiding (time)
 import Sound.ALSA.Sequencer.Connect
+import Sound.ALSA.Sequencer.Queue
 import Sound.ALSA.Sequencer 
 import Sound.ALSA.Exception  
 import Sound.OSC
@@ -196,3 +197,32 @@ midiOut name recha count = do
                                   void $ outputDirect h $ ev
                     o -> void $ outputDirect h $ forConnection (toSubscribers (Sound.ALSA.Sequencer.Address.Cons c p)) $ o
     return ech
+midiInTime  :: String  -- ^ client name
+        -> IO ThreadId
+midiInTime name = 
+      forkIO $ (`catch` \e -> putStrLn $ "midi_exception: " ++ show e)  $ do
+            withDefault Block $ \h -> do
+                setName (h :: Sound.ALSA.Sequencer.T InputMode) $ name ++ " ctrl_in"
+                c <- getId h
+                withSimple h "ctrl_in" (caps [capWrite, capSubsWrite]) typeMidiGeneric $ \p -> forever $ input h >>= print
+
+midiOutTime  :: String  -- ^ client name
+        -> Time
+        -> IO ThreadId
+midiOutTime name t = do
+      t0 <- time
+      let n = fromIntegral . floor $ t0 / t
+      forkIO $ (`catch` \e -> putStrLn $ "midi_exception: " ++ show e)  $ do
+            withDefault Block $ \h -> do
+                setName (h :: Sound.ALSA.Sequencer.T OutputMode) $ name ++ " time_out"
+                c <- getId h
+                withSimple h "ctrl_in" (caps [capRead, capSubsRead]) typeMidiGeneric $ \p -> 
+                    let loop n = do
+                            sleepThreadUntil $ n * t
+                            void $ outputDirect h $ forConnection (toSubscribers (Sound.ALSA.Sequencer.Address.Cons c p)) $  QueueEv QueueClock Sound.ALSA.Sequencer.Queue.direct
+                            loop $ n + 1
+                    in loop 1
+
+main = do
+  midiOutTime "timeout" $ 0.125/6
+  getLine
