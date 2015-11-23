@@ -1,5 +1,5 @@
 
-{-# LANGUAGE TypeFamilies, TemplateHaskell #-}
+{-# LANGUAGE TypeFamilies, TemplateHaskell, Rank2Types #-}
 
 -- module Sequencer where
 
@@ -35,101 +35,192 @@ data Event = Event {
         } deriving Show
 -}
 
-
-data Environment = Environment
-	{	_clock :: Integer
-	,	_factor :: Double
+data Clocked a = Clocked 
+	{ 	_clock :: Integer
+	,	_element :: a
+	}
+        deriving (Show)	
+$(makeLenses ''Clocked)
+data Euclidean = Euclidean 
+	{	_factor :: Double
 	,	_offset :: Integer
 	,	_group :: Integer
-	,	_volume	:: Double
 	,	_delay :: Integer
+	
+	}
+        deriving (Show)	
+$(makeLenses ''Euclidean)
+data Instrument = Instrument
+	{	_volume	:: Double
 	,	_sample :: Integer
 	,	_unmuted :: Bool 
 	,	_effects :: M.Map Int Double
 	} deriving (Show)
 
-$(makeLenses ''Environment)
-data Field = Clock Integer | Factor Double | Offset Integer | Sub Integer | Volume Double | Delay Integer | Sample Integer | Unmuted Bool | Effect Int Integer
+$(makeLenses ''Instrument)
+
+data RythmDeformerField = Index Int | Changes [[EuclideanField]] deriving (Show,Read)
+data ClockedField = Clock Integer deriving (Show,Read)
+data EuclideanField = Factor Double | Offset Integer | Sub Integer | Delay Integer
         deriving (Show,Read)
-setField :: Field -> Environment -> Environment
-setField (Clock i)  =  set clock i
-setField (Factor i)  =  set  factor i
-setField (Offset i)  =  set  offset i
-setField (Sub i)  =  set group i
-setField (Volume i)  =  set volume i
-setField (Delay i)  =  set delay i
-setField (Sample i)  =  set sample i
-setField (Unmuted i)  =  set unmuted i
-setField (Effect i x)  =  over effects (M.adjust (const $ fromIntegral x/1000) i)
+data InstrumentFieled =  Volume Double | Sample Integer | Unmuted Bool | Effect Int Integer
+        deriving (Show,Read)
 
-data Query = Query Int deriving (Show,Read)
-
-mkConfig :: Environment -> Config
-mkConfig (Environment cl fa ofs gr _ de _ _ _) = Config cl (seque (1 + fa * (fromIntegral gr - 1)) gr $ fromIntegral ofs) (de,gr)
+data RythmDeformer = RythmDeformer
+        {       _rythmindex :: Int
+        ,       _efis :: [[EuclideanField]]
+        }      deriving (Show)  
+$(makeLenses ''RythmDeformer)
 
 
-render :: Int ->  Environment -> (Time,Period,Period) -> IO ()
-render c (Environment _ _ _ _ v de sa m ef) (t,dt,dt') = when m $ playSample c sa (t + 0.2) 0.5 (4*v*dt') dt (ef) 3 1
+setRythmDeformerField (Index i) = set (element . rythmindex) i
+setRythmDeformerField (Changes ls) = set (element . efis) ls
+
+setInstrField (Volume i)  =  set (element . volume ) i
+setInstrField (Sample i)  =  set (element . sample ) i
+setInstrField (Unmuted i)  =  set (element . unmuted ) i
+setInstrField (Effect i x)  =  over (element . effects ) (M.adjust (const $ fromIntegral x/1000) i)
+setClockedField (Clock i)  =  set clock i
+
+setRythmField (Factor i)  =  set  (element . factor ) i
+setRythmField (Offset i)  =  set  (element . offset ) i
+setRythmField (Sub i)  =  set (element . group ) i
+setRythmField (Delay i)  =  set (element . delay ) i
+
+
+data Select = Rythm Int | Instr Int | Rdefo Int deriving (Show,Read)
+
+
+mkConfig :: Clocked Euclidean -> Config
+mkConfig (Clocked cl (Euclidean fa ofs gr de)) = Config cl (seque (1 + fa * (fromIntegral gr - 1)) gr $ fromIntegral ofs) (de,gr)
+
+
+render :: Int ->  Instrument -> (Time,Period,Period) -> IO ()
+render c (Instrument v sa m ef) (t,dt,dt') = when m $ playSample c sa (t + 0.2) 0.5 (4*v*dt') dt (ef) 3 1
 
 main = do
         t <- time
 	te <- newTChanIO 
-        c1 <- newTVarIO $ (Environment 0 0 0 4 0.5 0 50 True $ M.fromList $ zip [0..] $ replicate 24 0)
-        c2 <- newTVarIO $ (Environment 1 0 0 4 0.5 0 50 True $ M.fromList $ zip [0..] $ replicate 24 0)
-        c3 <- newTVarIO $ (Environment 2 0 0 4 0.5 0 50 True $ M.fromList $ zip [0..] $ replicate 24 0)
-        c4 <- newTVarIO $ (Environment 3 0 0 4 0.5 0 50 True $ M.fromList $ zip [0..] $ replicate 24 0)
-        c5 <- newTVarIO $ (Environment 4 0 0 4 0.5 0 50 True $ M.fromList $ zip [0..] $ replicate 24 0)
-        c6 <- newTVarIO $ (Environment 5 0 0 4 0.5 0 50 True $ M.fromList $ zip [0..] $ replicate 24 0)
-        c7 <- newTVarIO $ (Environment 6 0 0 4 0.5 0 50 True $ M.fromList $ zip [0..] $ replicate 24 0)
-        c8 <- newTVarIO $ (Environment 7 0 0 4 0.5 0 50 True $ M.fromList $ zip [0..] $ replicate 24 0)
-	let cs = [c1,c2,c3,c4,c5,c6,c7,c8]
-	forM_ (zip [1..] cs) $ \(n,c) -> do
-		te' <- atomically $ dupTChan te
-		forkIO $ sequencer  n te' (mkConfig `fmap` readTVar c)
+
+	cs <- forM [0..7] $ \_ -> newTVarIO $ (Clocked 0 $ Euclidean 0 0 4 0)
+	es <- forM [0..7] $ \_ -> newTVarIO (Clocked 0 $ Instrument 0.5 50 True $ M.fromList $ zip [0..] $ replicate 24 0)
+	ds <- forM [0..7] $ \_ -> newTVarIO $ (Clocked 0 $ RythmDeformer 0 $ [])
+
+	-- master tempo (2 sec)
 	forkIO $ 	let l t = do
 				atomically $ writeTChan te (Event 0 t 2)
 				pauseThreadUntil t
 				l (t + 2)
 		  	in l t
 
-	mj <- newTVarIO (M.fromList $ zip [1..8] $ repeat 0)
+	-- euclidean replicators
+	forM_ (zip [1..] cs) $ \(n,c) -> do
+		te' <- atomically $ dupTChan te
+		forkIO $ sequencer  n te' (mkConfig `fmap` readTVar c)
+
+        -- players
+	mj <- newTVarIO (M.fromList $ zip [0..7] $ repeat 0) -- remember last dt
 	forkIO . forever $ do
 		Event j t dt <- atomically $ readTChan te
-                dt' <- flip (M.!) j `fmap` atomically (readTVar mj)
-                atomically $ modifyTVar mj $ M.adjust (const dt) j
-		when (j > 0) $ do 
-			e <- atomically (readTVar $ cs !! (fromIntegral j - 1))
-			render (fromIntegral j - 1) e (t,dt,dt')
-	midi cs
-        tk <- newTVarIO 0
+		forM_ (zip [0..] es) $ \(i,te) -> do
+                                e <- atomically $ readTVar te
+                                when (e ^. clock == j) $ do
+                                        dt' <- flip (M.!) i `fmap` atomically (readTVar mj)
+                                        atomically $ modifyTVar mj $ M.adjust (const dt) i
+                                        render (fromIntegral i) (e ^. element) (t,dt,dt')
+        
+        -- rythm deformers 
+        te' <- atomically $ dupTChan te
+	mj <- newTVarIO (M.fromList $ zip [0..7] $ repeat []) -- remember last dt
+        forkIO . forever $ do
+		Event j t dt <- atomically $ readTChan te'
+                -- reset each Event on 0
+                when (j == 0) $ atomically $ do 
+                                ls <- forM ds $ fmap (view (element . efis)) . readTVar 
+                                writeTVar mj (M.fromList $ zip [0..7] $ ls)
+                -- execute deformers on j
+		forM_ (zip [0..] ds) $ \(i,td) -> do 
+                                r <- atomically $ do
+                                        e <- readTVar td -- clocked deformer
+                                        if e ^. clock == j then do
+                                                rs <- flip (M.!) i `fmap` readTVar mj -- actual state for deformer i
+                                                case rs of
+                                                        [] -> return (return ()) -- nothing to deform
+                                                        (r : rs) -> do 
+                                                                modifyTVar mj $ M.adjust (\_ -> rs) i -- push new state
+                                                                -- return deforming action
+                                                                return $ do 
+                                                                        pauseThreadUntil (t - 0.02) -- wait until just
+                                                                        -- deform the pointed euclidean
+                                                                        atomically $ modifyTVar (cs !! (e ^. (element .rythmindex))) $ flip (foldr setRythmField) r
+                                                else return (return ())
+                                        
+                                -- fork the result
+                                forkIO r
+
+                                                
+
+	ti <- newTVarIO $ 0
+	tr <- newTVarIO $ 0
+	trd <- newTVarIO $ 0
+	tl <- newTVarIO $ Rythm 0
 	let input = do
                 l <- getLine
                 case l of
                         "end" -> return ()
                         _ -> case reads l of
-                                [(i,_)] -> do 
-                                        atomically $ writeTVar tk $ i `mod` 8
+                                [(Rythm i,_)] -> do 
+                                        atomically $ writeTVar tr $  i `mod` 8
+					atomically $ writeTVar tl (Rythm $ i `mod` 8)
+					(atomically $ readTVar $ cs !! i) >>= print 
                                         input 
-                                        
-                                _ -> case reads l of
-                                        [(c,_)] -> do 
-                                                atomically $ do 
-                                                        i <- readTVar tk        
-                                                        modifyTVar (cs !! i) $ setField c
-                                                input
-                
-                                        _ -> case reads l of
-                                                [(Query j,_)] -> do 
-                                                        v <- atomically $ readTVar (cs !! j)
-                                                        print v
-                                                        input
-                                                _ ->  print "lost" >> input
+                                [(Instr i,_)] -> do 
+                                        atomically $ writeTVar ti $  i `mod` 8
+					atomically $ writeTVar tl (Instr $ i `mod` 8)
+					(atomically $ readTVar $ es !! i) >>= print 
+                                        input 
+                                [(Rdefo i,_)] -> do 
+                                        atomically $ writeTVar trd $  i `mod` 8
+					atomically $ writeTVar tl (Rdefo $ i `mod` 8)
+					(atomically $ readTVar $ ds !! i) >>= print 
+                                        input 
+
+				_ -> case reads l of
+					[(c ,_)] -> do 
+						atomically $ do 
+							i <- readTVar tl
+                                                        case i of 
+								Rythm i -> modifyTVar (cs !! i) $ setClockedField c
+								Instr i -> modifyTVar (es !! i) $ setClockedField c
+								Rdefo i -> modifyTVar (ds !! i) $ setClockedField c
+
+						input
+					_ -> case reads l of
+						[(c,_)] -> do 
+							atomically $ do 
+								i <- readTVar tr      
+								modifyTVar (cs !! i) $ setRythmField c
+							input
+						_ -> case reads l of
+							[(c,_)] -> do 
+								atomically $ do 
+									i <- readTVar ti
+									modifyTVar (es !! i) $ setInstrField c
+								input
+                                                        _ -> case reads l of
+                                                                [(c,_)] -> do 
+                                                                        atomically $ do 
+                                                                                i <- readTVar trd
+                                                                                modifyTVar (ds !! i) $ setRythmDeformerField c
+                                                                        input
+
+                                                                _ ->  putStrLn "<< parsing failed >>" >> input
         input
  
 {-
 
-instance Binary Environment where
-	put (Environment sh o p co x m y) = put sh >> put o >> put p >> put co >> put x >> put m >>put y
+instance Binary Instrument where
+	put (Instrument sh o p co x m y) = put sh >> put o >> put p >> put co >> put x >> put m >>put y
 	get = do  
                 sh <- get
 		o <- get
@@ -139,14 +230,14 @@ instance Binary Environment where
 		m <- get
 		y <- get
 	
-		return (Environment sh o p co x m y)
+		return (Instrument sh o p co x m y)
 
 main = do	
   	ws <- decodeFile "current.bb"
 	se <- forM ws $ newTVarIO
-	-- se <- replicateM 8 $ newTVarIO (Environment (RaffineParams 7 0 12 $ rythm 7 12) 0 4 0 0 False $ M.fromList $ zip [0..] $ replicate 24 0)
+	-- se <- replicateM 8 $ newTVarIO (Instrument (RaffineParams 7 0 12 $ rythm 7 12) 0 4 0 0 False $ M.fromList $ zip [0..] $ replicate 24 0)
 	tap <- newTVarIO (3,1)
-	let 	loop :: Int  -> TVar Environment -> Sequencer Raffine1 -> IO ()
+	let 	loop :: Int  -> TVar Instrument -> Sequencer Raffine1 -> IO ()
 		loop c s (Sequencer f) = f (affineseq c tap s) >>= loop c s
 	forM_ (zip [0 ..] se) $ \(c,s) -> forkIO $ loop c s $  sequencer affinestep (Feedback (RaffineParams 7 0 12 $ rythm 7 12) (rythm 7 12) (0,1) 1)
 	getLine
@@ -157,7 +248,6 @@ main = do
 	
 
 
--}
 
 midi se = 	do
 	mc <- newTChanIO 
@@ -180,7 +270,7 @@ midi se = 	do
   	forkIO $ midiOutNPx ("samples") 0 tfbp2
 	forkIO . forever .atomically $ do
 		y <-  readTChan fbinst2
-		e@(Environment d fa ofs gr v de sa m ef) <- readTVar (se !! y)
+		e@(Instrument d fa ofs gr v de sa m ef) <- readTVar (se !! y)
 		writeTChan tfbp2 (24, floor $ v * 128,False)
 		writeTChan tfbp2 (31, fromIntegral sa,True )
 		writeTChan tfbp2 (25, fromIntegral de, False)
@@ -223,4 +313,5 @@ midi se = 	do
 		case s ^. unmuted of
 			True -> atomically $ writeTChan tfbp2 (n + 112,127, False)
 			False -> atomically $ writeTChan tfbp2 (n+ 112,0, False)
+-}
 
