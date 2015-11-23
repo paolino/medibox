@@ -13,6 +13,7 @@ import Data.Ord
 import System.Random
 import Control.Arrow
 import Data.Traversable
+import System.Console.Haskeline
 
 import TestAlsa
 import Board
@@ -81,26 +82,26 @@ updateNotes ctrls  = concatMap convert . concatMap dispatch . zipWith (updateTra
 
 
 data L = LR R | P | T deriving Read 
-data R = R Int Int Int Int Int Int Time Time deriving Read 
+data R = R Int Int Int Int Int Int Time deriving Read 
 
 randomNotes :: R -> IO [E N]
-randomNotes (R s n p0 dp v0 dv dt dl) = do
+randomNotes (R s n p0 dp v0 dv dl) = do
     setStdGen (mkStdGen s)
     forM [1 .. n] $ \_ -> do
       p <- randomRIO (p0,p0 + dp)
       v <- randomRIO (v0,v0 + dv)
-      t <- randomRIO (0,dt)
+      t <- randomRIO (0,1)
       dl <- randomRIO (0,dl)
       return $ E (N p v dl) t 
 
 
-l = LR (R 1 5 48 5 30 80 2 0.5)
+l = LR (R 1 5 48 5 30 80 0.3)
 
 input  tracks exit = forever $ do 
-      l <- getLine
-      join . atomically $ case reads l of 
-                      [(T,_)] -> return $ readTVarIO tracks >>= mapM_ print
-                      [(LR r,_)] -> do
+      l <- getInputLine "> "
+      liftIO . join . atomically $ case reads <$> l of 
+                      Just [(T,_)] -> return $ readTVarIO tracks >>= mapM_ print
+                      Just [(LR r,_)] -> do
                         return $ do 
                                   es <- randomNotes $ r 
                                   atomically $  
@@ -125,5 +126,5 @@ main = do
     
   exit <- newTChanIO
   forkIO $ sequp u board cmap
-  forkIO $ input tracks exit
+  forkIO . runInputT defaultSettings $ input tracks exit
   atomically $ readTChan exit

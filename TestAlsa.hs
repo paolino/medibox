@@ -38,6 +38,7 @@ import Control.Concurrent.STM
 import Control.Concurrent
 import qualified Data.Map as M
 import Data.List
+import Control.Lens
 
 
 
@@ -46,7 +47,7 @@ data N = N Int Int Time deriving (Show,Read)
 data NE = Off Int |  On Int Int deriving (Eq,Ord, Show,Read)
 
 convert :: E N  ->  [E NE]
-convert (E (N p v dt) t) = [E (On p v) t,E (Off p) $ t + dt]
+convert (E (N p v dt) t) = over (traverse . timet) dNorm [E (On p v) t,E (Off p) $ t + dt]
 
 
 sequp :: TChan () -> TVar [E NE] -> TVar (M.Map Int Int) -> IO ()
@@ -83,7 +84,6 @@ controls u tm h public = forever $ do
                         modifyTVar tm $ M.insert par val 
                         writeTChan u ()
         _ -> return ()
-  print e
 
 mainIO :: TVar [E NE] -> SndSeq.T SndSeq.DuplexMode -> Port.T -> Queue.T -> IO ()
 mainIO tt h public  q = do
@@ -107,23 +107,31 @@ mainIO tt h public  q = do
 
   Queue.control h q Event.QueueStart Nothing
 
-  let schedule n quant p = do
-         let  period = p / fromIntegral quant
-              l = n `mod` quant
-              l' = (n - 2) `mod` quant
-              t = fromIntegral n * period
-         ons <- sort <$> pickBoard (Span (fromIntegral l * period) (fromIntegral (l + 1) * period)) <$> readTVarIO tt
+  let schedule t s = do
+         now <- Sound.OSC.time
+         print $ t - now
+         ons <- pickBoard s <$> readTVarIO tt
          let  k (On p v) = play t Event.NoteOn (Event.Pitch $ fromIntegral p) (Event.Velocity $ fromIntegral v)
               k (Off p) = play t Event.NoteOff (Event.Pitch $ fromIntegral p) (Event.Velocity $ fromIntegral 0)
+         print ons
          forM_ ons k
          _ <- Event.drainOutput h
          return ()
 
   -- main loop
   t0 <- Sound.OSC.time
-  let bar = 120 / 125
-  let go n p = do
-         sleepThreadUntil $ t0 + bar * fromIntegral n / fromIntegral p
-         schedule (n + 1) p bar
-         go (n + 1) p
-  go 0 8
+  let   bar = 4 * beat
+        beat = 120 / bpm
+        bpm = 125
+        subd = 32
+        quant = bar * inputq
+        inputq = 1 / fromIntegral subd
+  let go n  = do
+         let  t = quant * fromIntegral n
+              l = n `mod` subd
+              hr = fromIntegral l * inputq
+              er = hr + inputq
+         sleepThreadUntil $ t + t0 
+         schedule (t + quant) (Span hr er)
+         go (n + 1) 
+  go 0 
