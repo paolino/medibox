@@ -17,6 +17,7 @@ import System.Console.Haskeline
 
 import TestAlsa
 import Board
+
 type Controls = M.Map Int Int
 readValue :: Int -> Double -> Double -> Controls -> Double
 readValue i f s = (+s) . (*f) . (/128) . fromIntegral . M.findWithDefault 0 i
@@ -53,11 +54,15 @@ displace (Displace dt ro) = over timet ((+dt) . (*ro)) where
 
 readDisplace n m =  Displace 
   (readValue (16 + n) 4 0 m) 
-  (readValue (8 + n)  2 0.5 m)
+  (readValue (8 + n)  2 0 m)
   
+readRepeat n m =   floor
+  (readValue (32 + n) 128 0 m) 
+
 data Track = Track {
   _morpher :: Morph,
   _displacer ::  Displace,
+  _repeat :: Int , 
   _eventi :: [E N]
   } deriving (Show,Read)
 
@@ -66,11 +71,12 @@ makeLenses ''Track
 
 
 dispatch :: Track -> [E N]
-dispatch (Track m d es ) = map (displace d . morph m) es 
+dispatch (Track m d n es ) = [0..n] >>= f where
+  f i = map (over timet (+ (fromIntegral i / (fromIntegral n + 1))) .over timet (/(1 + fromIntegral n)) . displace d . morph m) es 
     
 
 updateTrack ::  Controls -> TrackId -> Track -> Track
-updateTrack m i (Track  _ _ es ) = Track (readMorph i m ) (readDisplace i m)  es
+updateTrack m i (Track  _ _ _ es ) = Track (readMorph i m ) (readDisplace i m)  (readRepeat i m) es
 
 
 
@@ -88,11 +94,12 @@ randomNotes :: R -> IO [E N]
 randomNotes (R s n p0 dp v0 dv dl) = do
     setStdGen (mkStdGen s)
     forM [1 .. n] $ \_ -> do
-      p <- randomRIO (p0,p0 + dp)
-      v <- randomRIO (v0,v0 + dv)
-      t <- randomRIO (0,1)
-      dl <- randomRIO (0,dl)
-      return $ E (N p v dl) t 
+          p <- randomRIO (p0,p0 + dp)
+          v <- randomRIO (v0,v0 + dv)
+          t <-  randomRIO (0,1)
+          dl' <- randomRIO (0,dl)
+          return $  E (N p v dl') t
+
 
 
 l = LR (R 1 5 48 5 30 80 0.3)
@@ -115,7 +122,7 @@ main = do
   board <- newTVarIO [] 
   cmap <- newTVarIO M.empty 
 
-  tracks <- newTVarIO $ replicate 8 $ Track  (Morph 0 100) (Displace 0 1) pg 
+  tracks <- newTVarIO $ replicate 8 $ Track  (Morph 0 100) (Displace 0 1) 0 pg 
   u <- newTChanIO 
   forkIO . forever . atomically $ do
       () <- readTChan u

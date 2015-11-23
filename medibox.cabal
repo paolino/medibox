@@ -17,4 +17,4 @@ cabal-version:       >=1.8
 executable medibox
   main-is:Seq.hs
   ghc-options: -threaded -O2
-  build-depends:       base , hosc,binary, containers , lens , stm , alsa-seq , alsa-core , filepath , filemanip , directory , random-shuffle , haskeline , random 
+  build-depends:       base , hosc,binary, containers , lens , stm , alsa-seq , alsa-core , filepath , filemanip , directory , random-shuffle , haskeline , random, transformers, utility-ht 
