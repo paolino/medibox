@@ -63,16 +63,18 @@ data Track = Track {
   _morpher :: Morph,
   _displacer ::  Displace,
   _repeat :: Int , 
+  -- _randomness :: R,
   _eventi :: [E N]
   } deriving (Show,Read)
 
 makeLenses ''Track 
 
 
-
 dispatch :: Track -> [E N]
 dispatch (Track m d n es ) = [0..n] >>= f where
-  f i = map (over timet (+ (fromIntegral i / (fromIntegral n + 1))) .over timet (/(1 + fromIntegral n)) . displace d . morph m) es 
+  l = length es
+  es' = take ((l `div` (n + 1)) + 1) es
+  f i = map (over timet (+ (fromIntegral i / (fromIntegral n + 1))) .over timet (/(1 + fromIntegral n)) . displace d . morph m) es'
     
 
 updateTrack ::  Controls -> TrackId -> Track -> Track

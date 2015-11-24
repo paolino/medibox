@@ -109,7 +109,7 @@ mainIO tt h public  q = do
 
   let schedule t s = do
          now <- Sound.OSC.time
-         ons <- pickBoard s <$> readTVarIO tt
+         ons <- sort <$> pickBoard s <$> readTVarIO tt
          let  k (On p v) = play t Event.NoteOn (Event.Pitch $ fromIntegral p) (Event.Velocity $ fromIntegral v)
               k (Off p) = play t Event.NoteOff (Event.Pitch $ fromIntegral p) (Event.Velocity $ fromIntegral 0)
          forM_ ons k
