@@ -42,12 +42,12 @@ import Control.Lens
 
 
 
-data N = N Int Int Time deriving (Show,Read)
+data N = N Int Int Int Time deriving (Show,Read)
 
-data NE = Off Int |  On Int Int deriving (Eq,Ord, Show,Read)
+data NE = Off Int Int |  On Int Int Int deriving (Eq,Ord, Show,Read)
 
 convert :: E N  ->  [E NE]
-convert (E (N p v dt) t) = over (traverse . timet) dNorm [E (On p v) t,E (Off p) $ t + dt]
+convert (E (N c p v dt) t) = over (traverse . timet) dNorm [E (On c p  v) t,E (Off c p) $ t + dt]
 
 
 sequp :: TChan () -> TVar [E NE] -> TVar (M.Map Int Int) -> IO ()
@@ -101,27 +101,27 @@ mainIO tt h public  q = do
              Event.time = Time.consAbs . Time.Real . RealTime.fromDouble $ t
           }
 
-  let  play t onoff p v =
+  let  play t c onoff p v =
          (Event.output h $ mkEv t $ Event.NoteEv onoff $
-          Event.simpleNote (Event.Channel 0) p v)
+          Event.simpleNote (Event.Channel $ fromIntegral c) p v)
 
   Queue.control h q Event.QueueStart Nothing
 
   let schedule t s = do
          now <- Sound.OSC.time
          ons <- sort <$> pickBoard s <$> readTVarIO tt
-         let  k (On p v) = play t Event.NoteOn (Event.Pitch $ fromIntegral p) (Event.Velocity $ fromIntegral v)
-              k (Off p) = play t Event.NoteOff (Event.Pitch $ fromIntegral p) (Event.Velocity $ fromIntegral 0)
+         let  k (On c p v) = play t c Event.NoteOn (Event.Pitch $ fromIntegral p) (Event.Velocity $ fromIntegral v)
+              k (Off c p) = play t c Event.NoteOff (Event.Pitch $ fromIntegral p) (Event.Velocity $ fromIntegral 0)
          forM_ ons k
          _ <- Event.drainOutput h
          return ()
 
   -- main loop
   t0 <- Sound.OSC.time
-  let   bar = 4 * beat
+  let   bar = 8 * beat
         beat = 120 / bpm
         bpm = 125
-        subd = 32
+        subd = 64
         quant = bar * inputq
         inputq = 1 / fromIntegral subd
   let go n  = do
