@@ -50,8 +50,9 @@ convert :: E N  ->  [E NE]
 convert (E (N c p v dt) t) = over (traverse . timet) dNorm [E (On c p  v) t,E (Off c p) $ t + dt]
 
 
-sequp :: TChan () -> TVar [E NE] -> TVar (M.Map Int Int) -> IO ()
-sequp u tracks cmap = do 
+sequp :: (M.Map Int Int -> Board N) -> IO () 
+sequp  change = do 
+  board <- newTVarIO []
   handleExceptionCont $ do
     h <- ContT $ SndSeq.withDefault SndSeq.Block
     liftIO $ Client.setName h "Haskell-Beat"
@@ -67,25 +68,28 @@ sequp u tracks cmap = do
           (Port.types [Port.typeMidiGeneric])
     -- the time accurate queue from alsa seq
     q <- ContT $ Queue.with h
-    liftIO . forkIO $ controls u cmap h public
-    liftIO $ mainIO tracks h public q
+    liftIO . forkIO $ controls board change h
+    liftIO $ mainIO board h public q
 
 
 
-controls :: TChan () -> TVar (M.Map Int Int) -> SndSeq.T SndSeq.DuplexMode -> Port.T -> IO ()
-controls u tm h public = forever $ do
-  e <- Event.input h
-  case Event.body e of
-        CtrlEv Controller (Ctrl 
-            (Channel (fromIntegral -> cha)) 
-            (Parameter (fromIntegral -> par)) 
-            (Value (fromIntegral -> val))
-            ) -> atomically $ do 
-                        modifyTVar tm $ M.insert par val 
-                        writeTChan u ()
-        _ -> return ()
+controls :: TVar (Board NE) -> (M.Map Int Int -> Board N) -> SndSeq.T SndSeq.DuplexMode -> IO ()
+controls board change h = 
+                        let loop m = do
+                                  e <- Event.input h
+                                  case Event.body e of
+                                        CtrlEv Controller (Ctrl 
+                                            (Channel (fromIntegral -> cha)) 
+                                            (Parameter (fromIntegral -> par)) 
+                                            (Value (fromIntegral -> val))
+                                            ) -> do
+                                                let m' = M.insert par val m
+                                                atomically $ writeTVar board $ change m' >>= convert
+                                                loop $ m'
+                                        _ -> loop m
+                        in loop M.empty
 
-mainIO :: TVar [E NE] -> SndSeq.T SndSeq.DuplexMode -> Port.T -> Queue.T -> IO ()
+mainIO :: TVar (Board NE) -> SndSeq.T SndSeq.DuplexMode -> Port.T -> Queue.T -> IO ()
 mainIO tt h public  q = do
   -- initialize for using time 
   PortInfo.modify h public $ do
