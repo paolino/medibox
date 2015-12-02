@@ -41,18 +41,8 @@ import Data.List
 import Control.Lens
 
 
-
-data N = N Int Int Int Time deriving (Show,Read)
-
-data NE = Off Int Int |  On Int Int Int deriving (Eq,Ord, Show,Read)
-
-convert :: E N  ->  [E NE]
-convert (E (N c p v dt) t) = over (traverse . timet) dNorm [E (On c p  v) t,E (Off c p) $ t + dt]
-
-
-sequp :: (M.Map Int Int -> Board N) -> IO () 
-sequp  change = do 
-  board <- newTVarIO []
+sequp :: TVar (Board NE) -> IO () 
+sequp board = do 
   handleExceptionCont $ do
     h <- ContT $ SndSeq.withDefault SndSeq.Block
     liftIO $ Client.setName h "Haskell-Beat"
@@ -68,26 +58,8 @@ sequp  change = do
           (Port.types [Port.typeMidiGeneric])
     -- the time accurate queue from alsa seq
     q <- ContT $ Queue.with h
-    liftIO . forkIO $ controls board change h
     liftIO $ mainIO board h public q
 
-
-
-controls :: TVar (Board NE) -> (M.Map Int Int -> Board N) -> SndSeq.T SndSeq.DuplexMode -> IO ()
-controls board change h = 
-                        let loop m = do
-                                  e <- Event.input h
-                                  case Event.body e of
-                                        CtrlEv Controller (Ctrl 
-                                            (Channel (fromIntegral -> cha)) 
-                                            (Parameter (fromIntegral -> par)) 
-                                            (Value (fromIntegral -> val))
-                                            ) -> do
-                                                let m' = M.insert par val m
-                                                atomically $ writeTVar board $ change m' >>= convert
-                                                loop $ m'
-                                        _ -> loop m
-                        in loop M.empty
 
 mainIO :: TVar (Board NE) -> SndSeq.T SndSeq.DuplexMode -> Port.T -> Queue.T -> IO ()
 mainIO tt h public  q = do
@@ -112,7 +84,6 @@ mainIO tt h public  q = do
   Queue.control h q Event.QueueStart Nothing
 
   let schedule t s = do
-         now <- Sound.OSC.time
          ons <- sort <$> pickBoard s <$> readTVarIO tt
          let  k (On c p v) = play t c Event.NoteOn (Event.Pitch $ fromIntegral p) (Event.Velocity $ fromIntegral v)
               k (Off c p) = play t c Event.NoteOff (Event.Pitch $ fromIntegral p) (Event.Velocity $ fromIntegral 0)

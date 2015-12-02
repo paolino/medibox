@@ -18,6 +18,7 @@ import System.Console.Haskeline
 
 import TestAlsa
 import Board
+import Interface
 
 type Controls = M.Map Int Int
 
@@ -46,7 +47,7 @@ data Repeat = Repeat {
   } deriving (Show,Read)
 
 repea ::  Repeat  -> Int -> Int -> E a -> E a
-repea (Repeat n s) i k  = over timet (+ (fromIntegral k / (fromIntegral s + 1) / (fromIntegral n + 1))) . over timet (+ (fromIntegral i / (fromIntegral n + 1)))
+repea (Repeat (fromIntegral -> n) (fromIntegral -> s)) (fromIntegral -> i) (fromIntegral -> k)  = over timet (+ (1/(n + 1)*(i +  k / (s + 1))))
 
 
 readRepeat n m = Repeat
@@ -76,41 +77,40 @@ readRandomness n  m = R
 data Track = Track {
   _displacer ::  Displace,
   _repeater :: Repeat , 
-  _randomnesser :: R
+  _randomnesser :: R,
+  _sections :: M.Map Int Bool
   } deriving (Show,Read)
 
 makeLenses ''Track 
 
 
 events :: Int -> Track -> [E N]
-events c (Track d r@(Repeat n s) ra) = [0..n] >>= \n -> [0..s] >>= f n where
+events c (Track d r@(Repeat n s) ra se) = [0..n] >>= \i -> [0..s] >>= f i where
   es = randomness c ra
   l = length es
-  es' = take ((l `div` (n + 1) `div` (s + 1)) + 1) es
-  f i k = map (repea r i k . displace d ) es'
+  es' i k = case se M.! (i * (s + 1) + k) of
+        True ->  take ((l `div` (n + 1) `div` (s + 1)) + 1) es
+        _ -> []
+  f i k = map (repea r i k . displace d ) (es' i k)
     
 
-fromControls ::  Controls -> Int -> Track
-fromControls  m i = Track (readDisplace i m)  (readRepeat i m) (readRandomness i m)
+fromControls ::  Channell -> Int -> Track
+fromControls  (Channell m cs)  i = Track (readDisplace i m)  (readRepeat i m ) (readRandomness i m) (cs M.! i)
 
 -- listen to notes and substitute the nearest event
-board :: M.Map Int Int -> Board N
-board m  =  [0 ..7] >>= (events `ap` (fromControls m)) 
+boarder :: Channell -> Board N
+boarder c =  [0 ..7] >>= (events `ap` (fromControls c)) 
 
 
 data L =  P | T | Q deriving Read 
 
-pg c = [E (N c 50 50 0.8) 0 , E (N c 60 50 0.8)  0.25 ,E (N c 40 50 0.8) 0.65 , E (N c 70 50 0.8) 0.5 , E (N c 90 50 0.8) 0.75] 
-
 main = do
-
+  board <- newTVarIO [] 
   forkIO $ sequp board
+  change <- newTChanIO 
+  forkIO . forever . atomically $ do
+                c <- readTChan change
+                writeTVar board $ boarder c >>= convert 
+  gui change
 
-  exit <- newTChanIO
-  forkIO . runInputT defaultSettings $ forever $ do 
-      l <- getInputLine "> "
-      liftIO . atomically $ case reads <$> l of 
-                      Just [(Q,_)] ->   writeTChan exit () 
-                      _ -> return ()
 
-  atomically $ readTChan exit

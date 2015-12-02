@@ -40,3 +40,9 @@ type Board a = [E a]
 pickBoard s = map (view event) . filter (flip inSpan s . over timet dNorm)
 
 
+data N = N Int Int Int Time deriving (Show,Read)
+
+data NE = Off Int Int |  On Int Int Int deriving (Eq,Ord, Show,Read)
+
+convert :: E N  ->  [E NE]
+convert (E (N c p v dt) t) = over (traverse . timet) dNorm [E (On c p  v) t,E (Off c p) $ t + dt]
